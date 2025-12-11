@@ -28,6 +28,10 @@ type Props = {
   onTextLayerMetadataChange?: (metadata: { [layerId: string]: any }) => void
   onUpdateTextLayer?: (layerId: string, config: any) => Promise<void>
   onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
+  onUndo?: () => void
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
 }
 
 export function EditorLayout({
@@ -48,7 +52,11 @@ export function EditorLayout({
   textLayerMetadata,
   onTextLayerMetadataChange,
   onUpdateTextLayer,
-  onTextLayerCreated
+  onTextLayerCreated,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo
 }: Props) {
   const canvasStageRef = useRef<{
     handleDrawConfig?: (color: string, size: number) => void
@@ -103,6 +111,13 @@ export function EditorLayout({
           onActiveLayerChange={onActiveLayerChange}
           onLayersChange={onLayersChange}
           onTextLayerCreated={onTextLayerCreated}
+          textLayerMetadata={textLayerMetadata}
+          onUpdateTextLayer={onUpdateTextLayer}
+          onSelectTool={onSelectTool}
+          onUndo={onUndo}
+          onRedo={onRedo}
+          canUndo={canUndo}
+          canRedo={canRedo}
         />
       </main>
       <section className="editor-panel">

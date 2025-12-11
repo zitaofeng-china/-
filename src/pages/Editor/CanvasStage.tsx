@@ -1,4 +1,4 @@
-/**
+5/**
  * Canvas画布舞台组件
  * 核心画布组件，负责图像渲染、缩放、平移、裁剪等交互功能
  * 使用双层Canvas架构：背景层渲染图像，UI层绘制交互元素
@@ -10,10 +10,12 @@ import { Button } from '../../components/ui/Button'
 import Slider from '../../components/ui/Slider'
 import { useCanvasResize } from '../../hooks/useCanvasResize'
 import { useDrag } from '../../hooks/useDrag'
+import { useKeyPress } from '../../hooks/useKeyPress'
 import { exportImage } from '../../services/file.service'
 import { drawStroke, createStroke, type Point as DrawPoint } from '../../features/draw/draw.service'
 import { addTextLayer, getDefaultTextConfig, type TextLayer } from '../../features/text/text.service'
 import { Toast } from '../../components/Toast'
+import { debounce } from '../../utils/debounce'
 
 type Point = { x: number; y: number }
 type CropHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
@@ -32,6 +34,13 @@ type Props = {
   activeLayerId?: string | null
   onActiveLayerChange?: (id: string | null) => void
   onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
+  textLayerMetadata?: { [layerId: string]: Omit<TextLayer, 'id' | 'x' | 'y'> }
+  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<void>
+  onSelectTool?: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
+  onUndo?: () => void
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
 }
 
 const CanvasStage = React.forwardRef<
@@ -57,7 +66,14 @@ const CanvasStage = React.forwardRef<
   onLayersChange,
   activeLayerId,
   onActiveLayerChange,
-  onTextLayerCreated
+  onTextLayerCreated,
+  textLayerMetadata = {},
+  onUpdateTextLayer,
+  onSelectTool,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bgCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -77,6 +93,23 @@ const CanvasStage = React.forwardRef<
   const [isMovingLayer, setIsMovingLayer] = useState(false)
   const [movingLayerId, setMovingLayerId] = useState<string | null>(null)
   const [layerMoveStart, setLayerMoveStart] = useState<Point | null>(null)
+  const [editingTextLayerId, setEditingTextLayerId] = useState<string | null>(null)
+  const [editingTextValue, setEditingTextValue] = useState('')
+  const [editingTextPosition, setEditingTextPosition] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const textInputRef = useRef<HTMLTextAreaElement>(null)
+  const dragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastClickTime = useRef<number>(0)
+  const lastClickLayerId = useRef<string | null>(null)
+  const isUpdatingTextLayerRef = useRef<boolean>(false) // 标记是否正在更新文本图层
+  
+  // 创建防抖的文本更新函数
+  const debouncedTextUpdate = useRef(
+    debounce(async (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
+      if (onUpdateTextLayer) {
+        await onUpdateTextLayer(layerId, config)
+      }
+    }, 500)
+  ).current
 
   const minCropSize = 32
 
@@ -185,90 +218,90 @@ const CanvasStage = React.forwardRef<
       
       // 裁剪模式的overlay
       if (cropEnabled && crop && renderer.state.layers.length > 0) {
-        const t = getTransforms()
-        if (!t) return
+      const t = getTransforms()
+      if (!t) return
 
-        const halfW = crop.w / 2
-        const halfH = crop.h / 2
-        const center = { x: crop.x + halfW, y: crop.y + halfH }
-        const rad = (crop.rotation * Math.PI) / 180
-        const cos = Math.cos(rad)
-        const sin = Math.sin(rad)
-        const localPoints = [
-          { x: -halfW, y: -halfH },
-          { x: halfW, y: -halfH },
-          { x: halfW, y: halfH },
-          { x: -halfW, y: halfH }
-        ]
-        const toView = (p: Point) => {
-          const rx = p.x * cos - p.y * sin + center.x
-          const ry = p.x * sin + p.y * cos + center.y
-          return imageToView({ x: rx, y: ry })
-        }
-        const points = localPoints.map((p) => toView(p)!)
-        const rotateHandleView = toView({ x: 0, y: -halfH - 32 })
-        const midPoints = [
-          toView({ x: 0, y: -halfH }),
-          toView({ x: halfW, y: 0 }),
-          toView({ x: 0, y: halfH }),
-          toView({ x: -halfW, y: 0 })
-        ]
+      const halfW = crop.w / 2
+      const halfH = crop.h / 2
+      const center = { x: crop.x + halfW, y: crop.y + halfH }
+      const rad = (crop.rotation * Math.PI) / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      const localPoints = [
+        { x: -halfW, y: -halfH },
+        { x: halfW, y: -halfH },
+        { x: halfW, y: halfH },
+        { x: -halfW, y: halfH }
+      ]
+      const toView = (p: Point) => {
+        const rx = p.x * cos - p.y * sin + center.x
+        const ry = p.x * sin + p.y * cos + center.y
+        return imageToView({ x: rx, y: ry })
+      }
+      const points = localPoints.map((p) => toView(p)!)
+      const rotateHandleView = toView({ x: 0, y: -halfH - 32 })
+      const midPoints = [
+        toView({ x: 0, y: -halfH }),
+        toView({ x: halfW, y: 0 }),
+        toView({ x: 0, y: halfH }),
+        toView({ x: -halfW, y: 0 })
+      ]
 
-        ctx.save()
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.55)'
+      ctx.save()
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.55)'
+      ctx.beginPath()
+      ctx.rect(0, 0, t.vw, t.vh)
+      ctx.moveTo(points[0].x, points[0].y)
+      points.forEach((p, i) => {
+        if (i === 0) return
+        ctx.lineTo(p.x, p.y)
+      })
+      ctx.closePath()
+      ctx.fill('evenodd')
+
+      ctx.strokeStyle = '#38bdf8'
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([6, 6])
+      ctx.beginPath()
+      points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.closePath()
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      const drawHandle = (p?: Point | null, size = 9) => {
+        if (!p) return
+        const half = size / 2
+        ctx.fillStyle = '#fff'
+        ctx.strokeStyle = '#0f172a'
+        ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.rect(0, 0, t.vw, t.vh)
-        ctx.moveTo(points[0].x, points[0].y)
-        points.forEach((p, i) => {
-          if (i === 0) return
-          ctx.lineTo(p.x, p.y)
-        })
-        ctx.closePath()
-        ctx.fill('evenodd')
-
-        ctx.strokeStyle = '#38bdf8'
-        ctx.lineWidth = 1.5
-        ctx.setLineDash([6, 6])
-        ctx.beginPath()
-        points.forEach((p, i) => {
-          if (i === 0) ctx.moveTo(p.x, p.y)
-          else ctx.lineTo(p.x, p.y)
-        })
-        ctx.closePath()
+        ctx.rect(p.x - half, p.y - half, size, size)
+        ctx.fill()
         ctx.stroke()
-        ctx.setLineDash([])
+      }
+      points.forEach((p) => drawHandle(p))
+      midPoints.forEach((p) => drawHandle(p, 7))
 
-        const drawHandle = (p?: Point | null, size = 9) => {
-          if (!p) return
-          const half = size / 2
-          ctx.fillStyle = '#fff'
-          ctx.strokeStyle = '#0f172a'
-          ctx.lineWidth = 1
-          ctx.beginPath()
-          ctx.rect(p.x - half, p.y - half, size, size)
-          ctx.fill()
-          ctx.stroke()
-        }
-        points.forEach((p) => drawHandle(p))
-        midPoints.forEach((p) => drawHandle(p, 7))
+      if (rotateHandleView) {
+        ctx.beginPath()
+        ctx.moveTo(midPoints[0]!.x, midPoints[0]!.y)
+        ctx.lineTo(rotateHandleView.x, rotateHandleView.y)
+        ctx.strokeStyle = '#38bdf8'
+        ctx.lineWidth = 1
+        ctx.stroke()
 
-        if (rotateHandleView) {
-          ctx.beginPath()
-          ctx.moveTo(midPoints[0]!.x, midPoints[0]!.y)
-          ctx.lineTo(rotateHandleView.x, rotateHandleView.y)
-          ctx.strokeStyle = '#38bdf8'
-          ctx.lineWidth = 1
-          ctx.stroke()
+        ctx.beginPath()
+        ctx.arc(rotateHandleView.x, rotateHandleView.y, 7, 0, Math.PI * 2)
+        ctx.fillStyle = '#fff'
+        ctx.fill()
+        ctx.strokeStyle = '#0f172a'
+        ctx.stroke()
+      }
 
-          ctx.beginPath()
-          ctx.arc(rotateHandleView.x, rotateHandleView.y, 7, 0, Math.PI * 2)
-          ctx.fillStyle = '#fff'
-          ctx.fill()
-          ctx.strokeStyle = '#0f172a'
-          ctx.stroke()
-        }
-
-        ctx.restore()
+      ctx.restore()
       }
     })
     renderer.render()
@@ -374,11 +407,117 @@ const CanvasStage = React.forwardRef<
     return null
   }, [viewToImage])
 
+  // 处理双击事件，进入文本编辑模式
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (!rendererRef.current || rendererRef.current.state.layers.length === 0) {
+      return
+    }
+    
+    if (cropEnabled || drawEnabled) {
+      return
+    }
+    
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) {
+      return
+    }
+    const viewPt = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    
+    // 检测双击是否在图层上
+    const hitLayerId = hitTestLayer(viewPt)
+    
+    if (!hitLayerId) {
+      return
+    }
+    
+    const renderer = rendererRef.current
+    const layer = renderer.getLayer(hitLayerId)
+    const isTextLayer = layer && layer.name.startsWith('Text:')
+    
+    // 如果是文本图层，查找元数据
+    if (isTextLayer) {
+      // 查找元数据：先通过图层ID，如果找不到则通过图层名称匹配
+      let metadata = textLayerMetadata[hitLayerId]
+      if (!metadata) {
+        // 通过图层名称查找元数据（图层名称格式：Text: 文本内容）
+        const layerName = layer?.name || ''
+        const textContent = layerName.replace('Text: ', '')
+        // 遍历所有元数据，找到匹配的
+        for (const [, metaData] of Object.entries(textLayerMetadata)) {
+          if (metaData.text === textContent) {
+            metadata = metaData
+            break
+          }
+        }
+      }
+      
+      if (metadata) {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // 清除拖拽定时器，防止拖拽开始
+        if (dragTimeoutRef.current) {
+          clearTimeout(dragTimeoutRef.current)
+          dragTimeoutRef.current = null
+        }
+        
+        setEditingTextValue(metadata.text)
+        setEditingTextLayerId(hitLayerId)
+        
+        // 计算输入框位置
+        const t = getTransforms()
+        if (t && layer) {
+          const { x, y } = layer.offset
+          const { width: w, height: h } = layer.bitmap
+          const scaledW = w * layer.scale * t.zoom
+          const scaledH = h * layer.scale * t.zoom
+          const centerView = imageToView({ x: x + w / 2, y: y + h / 2 })
+          if (centerView) {
+            setEditingTextPosition({
+              x: centerView.x - scaledW / 2,
+              y: centerView.y - scaledH / 2,
+              width: scaledW,
+              height: scaledH
+            })
+          }
+        }
+        
+        // 延迟聚焦，确保DOM已更新
+        setTimeout(() => {
+          if (textInputRef.current) {
+            textInputRef.current.focus()
+            textInputRef.current.select()
+          }
+        }, 100)
+      } else {
+        // 未找到元数据则忽略
+      }
+    } else {
+      // 非文本图层不处理
+    }
+  }, [cropEnabled, drawEnabled, textLayerMetadata, hitTestLayer, imageToView, getTransforms])
+
   const handleMouseDown = (e: React.MouseEvent) => {
+    // 如果正在编辑文本，检查点击是否在输入框上
+    if (editingTextLayerId) {
+      // 检查点击是否在输入框上
+      const target = e.target as HTMLElement
+      if (target === textInputRef.current || textInputRef.current?.contains(target)) {
+        // 点击在输入框上，不处理，保持编辑状态
+        e.stopPropagation()
+        return
+      }
+      // 点击在输入框外，退出编辑模式
+      // 但只有在点击画布内（不是输入框）时才退出
+      setEditingTextLayerId(null)
+      setEditingTextPosition(null)
+      // 继续处理点击事件（选择图层、拖拽等）
+    }
+    
     if (!rendererRef.current || rendererRef.current.state.layers.length === 0) {
       // 没有图层时，使用画布拖拽
       if (!cropEnabled) {
-        dragHandlers.onMouseDown(e)
+    dragHandlers.onMouseDown(e)
       }
       return
     }
@@ -404,7 +543,114 @@ const CanvasStage = React.forwardRef<
     
     // 如果点击在图层上
     if (hitLayerId) {
-      // 如果点击的是已选中的图层，开始拖拽移动
+      const renderer = rendererRef.current
+      const layer = renderer?.getLayer(hitLayerId)
+      const isTextLayer = layer && layer.name.startsWith('Text:')
+      
+      // 检测是否为双击（300ms内连续点击同一图层）
+      const now = Date.now()
+      const isDoubleClick = isTextLayer && 
+        now - lastClickTime.current < 300 && 
+        lastClickLayerId.current === hitLayerId
+      
+      // 如果是双击文本图层，直接进入编辑模式
+      if (isDoubleClick && isTextLayer) {
+        // 查找元数据：先通过图层ID，如果找不到则通过图层名称匹配
+        let metadata = textLayerMetadata[hitLayerId]
+        if (!metadata) {
+          // 通过图层名称查找元数据（图层名称格式：Text: 文本内容）
+          const layerName = layer?.name || ''
+          const textContent = layerName.replace('Text: ', '')
+          // 遍历所有元数据，找到匹配的
+          for (const [metaLayerId, metaData] of Object.entries(textLayerMetadata)) {
+            if (metaData.text === textContent) {
+              metadata = metaData
+              break
+            }
+          }
+        }
+        
+        if (metadata) {
+          e.preventDefault()
+          e.stopPropagation()
+          
+          // 立即停止任何正在进行的拖拽
+          setIsMovingLayer(false)
+          setMovingLayerId(null)
+          setLayerMoveStart(null)
+          
+          // 清除拖拽定时器
+          if (dragTimeoutRef.current) {
+            clearTimeout(dragTimeoutRef.current)
+            dragTimeoutRef.current = null
+          }
+          
+          // 重置点击记录，避免连续双击
+          lastClickTime.current = 0
+          lastClickLayerId.current = null
+          
+          setEditingTextValue(metadata.text)
+          setEditingTextLayerId(hitLayerId)
+          
+          // 计算输入框位置
+          const t = getTransforms()
+          if (t && layer) {
+            const { x, y } = layer.offset
+            const { width: w, height: h } = layer.bitmap
+            const scaledW = w * layer.scale * t.zoom
+            const scaledH = h * layer.scale * t.zoom
+            const centerView = imageToView({ x: x + w / 2, y: y + h / 2 })
+            if (centerView) {
+              setEditingTextPosition({
+                x: centerView.x - scaledW / 2,
+                y: centerView.y - scaledH / 2,
+                width: scaledW,
+                height: scaledH
+              })
+            }
+          }
+          
+          // 延迟聚焦，确保DOM已更新
+          setTimeout(() => {
+            if (textInputRef.current) {
+              textInputRef.current.focus()
+              textInputRef.current.select()
+            }
+          }, 100)
+          
+          return
+        }
+      }
+      
+      // 更新点击记录（仅在非双击时）
+      lastClickTime.current = now
+      lastClickLayerId.current = hitLayerId
+      
+      // 如果是文本图层，延迟开始拖拽，等待可能的双击
+      if (hitLayerId === activeLayerId && !cropEnabled && isTextLayer) {
+        // 清除之前的拖拽定时器
+        if (dragTimeoutRef.current) {
+          clearTimeout(dragTimeoutRef.current)
+        }
+        
+        // 延迟开始拖拽，给双击事件时间（300ms，与双击检测时间一致）
+        dragTimeoutRef.current = setTimeout(() => {
+          // 如果300ms后还没有进入编辑模式，则开始拖拽
+          if (!editingTextLayerId && !isMovingLayer) {
+            setIsMovingLayer(true)
+            setMovingLayerId(activeLayerId)
+            const imgPt = viewToImage(viewPt)
+            if (imgPt) {
+              setLayerMoveStart(imgPt)
+            }
+          }
+          dragTimeoutRef.current = null
+        }, 300)
+        
+        return
+      }
+      
+      // 如果点击的是已选中的图层（非文本图层），开始拖拽移动
       if (hitLayerId === activeLayerId && !cropEnabled) {
         e.preventDefault()
         e.stopPropagation()
@@ -469,7 +715,7 @@ const CanvasStage = React.forwardRef<
         }
       }
     },
-    [drawEnabled, isDrawing, isMovingLayer, movingLayerId, layerMoveStart, viewToImage]
+    [drawEnabled, isDrawing, isMovingLayer, movingLayerId, layerMoveStart, viewToImage, editingTextLayerId]
   )
 
   const handleMouseUp = useCallback(async () => {
@@ -539,7 +785,9 @@ const CanvasStage = React.forwardRef<
     renderer.fitToView()
     syncZoom()
     onTimeline('裁剪完成')
-  }, [crop, activeLayerId, onTimeline])
+    // 完成裁剪后退出裁剪模式
+    onSelectTool?.(null)
+  }, [crop, activeLayerId, onTimeline, onSelectTool])
 
   const handleExport = async () => {
     const renderer = rendererRef.current
@@ -641,6 +889,14 @@ const CanvasStage = React.forwardRef<
     },
     [syncLayers, onTimeline, activeLayerId, onActiveLayerChange]
   )
+
+  // 快捷键：Delete 删除选中图层（编辑文本时不触发）
+  useKeyPress('Delete', () => {
+    if (editingTextLayerId) return
+    if (activeLayerId) {
+      handleLayerDelete(activeLayerId)
+    }
+  })
 
   const handleLayerVisibilityToggle = useCallback(
     (id: string, visible: boolean) => {
@@ -903,7 +1159,10 @@ const CanvasStage = React.forwardRef<
     window.removeEventListener('mouseup', onCropMouseUp)
   }
 
-  useEffect(() => updateOverlay(), [updateOverlay])
+  // 当activeLayerId变化时，更新overlay显示
+  useEffect(() => {
+    updateOverlay()
+  }, [activeLayerId, updateOverlay])
 
   useEffect(() => {
     const renderer = rendererRef.current
@@ -925,6 +1184,86 @@ const CanvasStage = React.forwardRef<
   useEffect(() => {
     updateOverlay()
   }, [activeLayerId, updateOverlay])
+  
+  // 当编辑文本图层时，更新输入框位置（当缩放或平移时）
+  // 同时检查图层ID是否变化（当文本更新时，图层会被重新创建，ID会变化）
+  useEffect(() => {
+    if (!editingTextLayerId || !rendererRef.current) return
+    
+    const renderer = rendererRef.current
+    let currentLayerId = editingTextLayerId
+    let layer = renderer.getLayer(editingTextLayerId)
+    
+    // 如果图层不存在，尝试通过文本内容查找新图层
+    if (!layer) {
+      const metadata = textLayerMetadata[editingTextLayerId]
+      if (metadata) {
+        // 通过文本内容查找新图层（查找最新的匹配图层）
+        const matchingLayers = renderer.state.layers.filter((l) => 
+          l.name.startsWith('Text:') && l.name.includes(metadata.text.substring(0, Math.min(10, metadata.text.length)))
+        )
+        // 使用最后一个匹配的图层（最新的）
+        if (matchingLayers.length > 0) {
+          const matchingLayer = matchingLayers[matchingLayers.length - 1]
+          if (matchingLayer.id !== editingTextLayerId) {
+            // 更新编辑中的图层ID
+            currentLayerId = matchingLayer.id
+            layer = matchingLayer
+            // 标记正在更新，避免触发退出编辑模式的逻辑
+            // 如果已经设置了标记，不重复设置（避免重置时间冲突）
+            if (!isUpdatingTextLayerRef.current) {
+              isUpdatingTextLayerRef.current = true
+              // 延迟重置标记，确保更新完成（统一使用2000ms）
+              setTimeout(() => {
+                isUpdatingTextLayerRef.current = false
+              }, 2000)
+            }
+            setEditingTextLayerId(matchingLayer.id)
+          }
+        }
+      }
+      if (!layer) return
+    }
+    
+    const t = getTransforms()
+    if (!t) return
+    
+    const { x, y } = layer.offset
+    const { width: w, height: h } = layer.bitmap
+    const scaledW = w * layer.scale * t.zoom
+    const scaledH = h * layer.scale * t.zoom
+    const centerView = imageToView({ x: x + w / 2, y: y + h / 2 })
+    if (centerView) {
+      setEditingTextPosition({
+        x: centerView.x - scaledW / 2,
+        y: centerView.y - scaledH / 2,
+        width: scaledW,
+        height: scaledH
+      })
+    }
+  }, [editingTextLayerId, zoomPct, textLayerMetadata])
+
+  // 当切换图层时，如果正在编辑文本，退出编辑模式
+  // 但如果正在更新文本图层（isUpdatingTextLayerRef.current），则不退出
+  useEffect(() => {
+    // 如果正在更新文本图层，跳过检查
+    if (isUpdatingTextLayerRef.current) {
+      return
+    }
+    
+    if (editingTextLayerId && activeLayerId && editingTextLayerId !== activeLayerId) {
+      // 检查新选中的图层是否是文本图层
+      const renderer = rendererRef.current
+      if (renderer) {
+        const newLayer = renderer.getLayer(activeLayerId)
+        // 如果新图层不是文本图层，或者不是正在编辑的图层，退出编辑模式
+        if (!newLayer || !newLayer.name.startsWith('Text:') || newLayer.id !== editingTextLayerId) {
+          setEditingTextLayerId(null)
+          setEditingTextPosition(null)
+        }
+      }
+    }
+  }, [activeLayerId, editingTextLayerId])
 
   useEffect(() => {
     const renderer = rendererRef.current
@@ -981,18 +1320,21 @@ const CanvasStage = React.forwardRef<
           </Button>
           <span className="text-sm text-slate-600">{zoomPct}%</span>
         </div>
-        {cropEnabled && crop && (
-          <Button variant="primary" onClick={handleCropConfirm}>
-            完成裁剪
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={onUndo} disabled={!canUndo}>
+            撤销
           </Button>
-        )}
+          <Button variant="ghost" onClick={onRedo} disabled={!canRedo}>
+            重做
+          </Button>
+        </div>
         <Button
           variant="primary"
           onClick={handleExport}
           disabled={!rendererRef.current || rendererRef.current.state.layers.length === 0}
         >
           导出
-        </Button>
+          </Button>
         <div className="text-xs text-slate-500">{fileName ?? '未加载图片'}</div>
       </div>
 
@@ -1001,19 +1343,199 @@ const CanvasStage = React.forwardRef<
         className={`canvas-stack ${isDragging ? 'dragging' : ''}`}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
+        // 移除 onDoubleClick，使用 handleMouseDown 中的手动双击检测
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
         <canvas ref={bgCanvasRef} />
         <canvas ref={uiCanvasRef} className="ui-layer" onMouseDown={onCropMouseDown} />
+        
+        {/* 文本编辑输入框 */}
+        {editingTextLayerId && editingTextPosition && (() => {
+          // 查找元数据：先通过图层ID，如果找不到则通过图层名称匹配
+          let metadata = textLayerMetadata[editingTextLayerId]
+          if (!metadata && rendererRef.current) {
+            const layer = rendererRef.current.getLayer(editingTextLayerId)
+            if (layer && layer.name.startsWith('Text:')) {
+              const layerName = layer.name
+              const textContent = layerName.replace('Text: ', '')
+              // 遍历所有元数据，找到匹配的（使用最新的文本内容）
+              for (const [metaLayerId, metaData] of Object.entries(textLayerMetadata)) {
+                // 匹配文本内容（允许部分匹配，因为图层名称可能被截断）
+                if (metaData.text.trim() === textContent.trim() || 
+                    textContent.trim().startsWith(metaData.text.trim().substring(0, Math.min(10, metaData.text.length)))) {
+                  metadata = metaData
+                  // 如果图层ID变化了，更新编辑中的图层ID（使用 setTimeout 避免在渲染过程中更新状态）
+                  if (metaLayerId !== editingTextLayerId) {
+                    // 标记正在更新，避免触发退出编辑模式的逻辑
+                    // 如果已经设置了标记，不重复设置（避免重置时间冲突）
+                    if (!isUpdatingTextLayerRef.current) {
+                      isUpdatingTextLayerRef.current = true
+                      // 延迟重置标记，确保更新完成（统一使用2000ms）
+                      setTimeout(() => {
+                        isUpdatingTextLayerRef.current = false
+                      }, 2000)
+                    }
+                    setTimeout(() => {
+                      setEditingTextLayerId(metaLayerId)
+                    }, 0)
+                  }
+                  break
+                }
+              }
+            }
+          }
+          // 如果还是找不到元数据，但正在编辑，使用 editingTextValue 作为后备
+          if (!metadata && editingTextValue) {
+            // 创建一个临时元数据对象
+            metadata = {
+              text: editingTextValue,
+              fontSize: 24,
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+              color: '#000000',
+              align: 'left' as const,
+              bold: false,
+              italic: false
+            }
+          }
+          return metadata
+        })() && (
+          <textarea
+            ref={textInputRef}
+            value={editingTextValue}
+            onChange={(e) => {
+              const newValue = e.target.value
+              setEditingTextValue(newValue)
+              
+              // 自动调整输入框高度以适应内容
+              if (textInputRef.current) {
+                textInputRef.current.style.height = 'auto'
+                textInputRef.current.style.height = `${Math.max(textInputRef.current.scrollHeight, editingTextPosition.height)}px`
+              }
+              
+              // 实时更新文本图层
+              // 使用当前的 editingTextLayerId 查找元数据
+              let currentLayerId = editingTextLayerId
+              let metadata = textLayerMetadata[editingTextLayerId]
+              
+              // 如果找不到元数据，尝试通过图层名称查找
+              if (!metadata && rendererRef.current) {
+                const layer = rendererRef.current.getLayer(editingTextLayerId)
+                if (layer && layer.name.startsWith('Text:')) {
+                  const layerName = layer.name
+                  const textContent = layerName.replace('Text: ', '')
+                  // 遍历所有元数据，找到匹配的（使用最新的文本内容）
+                  for (const [metaLayerId, metaData] of Object.entries(textLayerMetadata)) {
+                    // 匹配文本内容（允许部分匹配，因为图层名称可能被截断）
+                    if (metaData.text.trim() === textContent.trim() || 
+                        textContent.trim().startsWith(metaData.text.trim().substring(0, Math.min(10, metaData.text.length)))) {
+                      metadata = metaData
+                      currentLayerId = metaLayerId
+                      // 如果图层ID变化了，更新编辑中的图层ID（但不退出编辑状态）
+                      if (metaLayerId !== editingTextLayerId) {
+                        // 标记正在更新，避免触发退出编辑模式的逻辑
+                        // 如果已经设置了标记，不重复设置（避免重置时间冲突）
+                        if (!isUpdatingTextLayerRef.current) {
+                          isUpdatingTextLayerRef.current = true
+                          // 延迟重置标记，确保更新完成（统一使用2000ms）
+                          setTimeout(() => {
+                            isUpdatingTextLayerRef.current = false
+                          }, 2000)
+                        }
+                        // 使用 setTimeout 避免在渲染过程中更新状态，保持编辑状态
+                        setTimeout(() => {
+                          setEditingTextLayerId(metaLayerId)
+                        }, 0)
+                      }
+                      break
+                    }
+                  }
+                }
+              }
+              
+              if (metadata) {
+                const newConfig = {
+                  ...metadata,
+                  text: newValue || ' '
+                }
+                // 标记正在更新文本图层
+                // 如果已经设置了标记，不重复设置（避免重置时间冲突）
+                if (!isUpdatingTextLayerRef.current) {
+                  isUpdatingTextLayerRef.current = true
+                  // 延迟重置标记，给更新完成的时间（防抖500ms + 更新操作时间）
+                  setTimeout(() => {
+                    isUpdatingTextLayerRef.current = false
+                  }, 2000) // 2秒后重置，确保防抖和更新都完成
+                }
+                debouncedTextUpdate(currentLayerId, newConfig)
+              }
+            }}
+            onMouseDown={(e) => {
+              // 阻止事件冒泡，防止触发容器的 handleMouseDown
+              e.stopPropagation()
+            }}
+            onBlur={(e) => {
+              // 不立即退出编辑模式
+              // 只有在以下情况才退出：
+              // 1. 点击画布其他地方（由 handleMouseDown 处理）
+              // 2. 按 Enter 键（由 onKeyDown 处理）
+              // 3. 切换图层（由 onActiveLayerChange 处理）
+              // 这里不做任何操作，让其他事件处理器来决定是否退出
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                // ESC键退出编辑模式
+                setEditingTextLayerId(null)
+                setEditingTextPosition(null)
+                textInputRef.current?.blur()
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                // Enter键（非Shift+Enter）退出编辑模式
+                e.preventDefault()
+                setEditingTextLayerId(null)
+                setEditingTextPosition(null)
+                textInputRef.current?.blur()
+              }
+            }}
+            style={{
+              position: 'absolute',
+              left: `${editingTextPosition.x}px`,
+              top: `${editingTextPosition.y}px`,
+              width: `${Math.max(editingTextPosition.width, 200)}px`, // 最小宽度200px
+              minWidth: '200px',
+              minHeight: '40px',
+              maxWidth: 'none', // 不限制最大宽度
+              maxHeight: 'none', // 不限制最大高度
+              padding: '4px 8px',
+              border: '2px solid #3b82f6',
+              borderRadius: '4px',
+              fontSize: `${textLayerMetadata[editingTextLayerId]?.fontSize || 24}px`,
+              fontFamily: textLayerMetadata[editingTextLayerId]?.fontFamily || 'system-ui, -apple-system, sans-serif',
+              fontWeight: textLayerMetadata[editingTextLayerId]?.bold ? 'bold' : 'normal',
+              fontStyle: textLayerMetadata[editingTextLayerId]?.italic ? 'italic' : 'normal',
+              color: textLayerMetadata[editingTextLayerId]?.color || '#000000',
+              textAlign: textLayerMetadata[editingTextLayerId]?.align || 'left',
+              backgroundColor: 'rgba(255, 255, 255, 0.95)',
+              resize: 'both', // 允许调整大小
+              overflow: 'auto', // 允许滚动
+              overflowWrap: 'break-word', // 允许单词换行
+              wordWrap: 'break-word', // 允许单词换行
+              whiteSpace: 'pre-wrap', // 保留空格和换行，允许自动换行
+              zIndex: 1000,
+              outline: 'none',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+            }}
+            className="text-edit-input"
+          />
+        )}
+        
         <div className="canvas-hint glass">
           {drawEnabled
             ? '绘图模式：在画布上按住鼠标左键并拖拽来绘制'
             : textEnabled
-            ? '文本模式：在右侧面板输入文本并点击"添加文本"'
+            ? '文本模式：在右侧面板输入文本并点击"添加文本"，或双击文本图层直接编辑'
             : cropEnabled
             ? '裁剪模式：拖拽裁剪框来调整裁剪区域'
-            : '点击图片选择图层 · 选中后拖拽移动 · 滚轮缩放视图'}
+            : '点击图片选择图层 · 双击文本图层编辑 · 选中后拖拽移动 · 滚轮缩放视图'}
         </div>
       </div>
       {toastMessage && <Toast message={toastMessage} />}
