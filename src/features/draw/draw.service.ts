@@ -37,6 +37,26 @@ export async function drawStroke(
     throw new Error('目标图层不存在')
   }
 
+  // 将世界坐标（图像坐标）转换为图层本地坐标，考虑位移/缩放/旋转
+  const toLocal = (pt: Point) => {
+    const { offset, scale, rotation, bitmap } = targetLayer
+    const centerX = offset.x + bitmap.width / 2
+    const centerY = offset.y + bitmap.height / 2
+    const dx = pt.x - centerX
+    const dy = pt.y - centerY
+    const rad = (-rotation * Math.PI) / 180
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+    const rx = dx * cos - dy * sin
+    const ry = dx * sin + dy * cos
+    return {
+      x: rx / scale + bitmap.width / 2,
+      y: ry / scale + bitmap.height / 2
+    }
+  }
+
+  const localPoints = stroke.points.map(toLocal)
+
   // 创建临时Canvas用于绘制笔画
   const canvas = document.createElement('canvas')
   canvas.width = targetLayer.bitmap.width
@@ -51,18 +71,18 @@ export async function drawStroke(
   ctx.drawImage(targetLayer.bitmap, 0, 0)
 
   // 绘制笔画
-  if (stroke.points.length > 0) {
+  if (localPoints.length > 0) {
     ctx.strokeStyle = stroke.color
     ctx.lineWidth = stroke.size
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
 
     ctx.beginPath()
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+    ctx.moveTo(localPoints[0].x, localPoints[0].y)
 
-    for (let i = 1; i < stroke.points.length; i++) {
-      const point = stroke.points[i]
-      const prevPoint = stroke.points[i - 1]
+    for (let i = 1; i < localPoints.length; i++) {
+      const point = localPoints[i]
+      const prevPoint = localPoints[i - 1]
 
       // 使用二次贝塞尔曲线使线条更平滑
       const midX = (prevPoint.x + point.x) / 2
@@ -75,12 +95,11 @@ export async function drawStroke(
       }
     }
 
-    // 如果是最后一个点，绘制到该点
-    if (stroke.points.length > 1) {
-      const lastPoint = stroke.points[stroke.points.length - 1]
+    if (localPoints.length > 1) {
+      const lastPoint = localPoints[localPoints.length - 1]
       ctx.quadraticCurveTo(
-        stroke.points[stroke.points.length - 2].x,
-        stroke.points[stroke.points.length - 2].y,
+        localPoints[localPoints.length - 2].x,
+        localPoints[localPoints.length - 2].y,
         lastPoint.x,
         lastPoint.y
       )
