@@ -2,36 +2,45 @@
  * 编辑器布局组件
  * 定义编辑器的整体布局结构，包括工具侧边栏、画布区域和属性面板
  */
-import React, { useRef, useImperativeHandle, forwardRef, useState, useEffect } from 'react'
-import { ToolSidebar } from './ToolSidebar'
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+
+import { ImageUploader } from '../../components/ImageUploader'
 import { CanvasStage } from './CanvasStage'
 import { PropertyPanel } from './PropertyPanel'
+import { ToolSidebar } from './ToolSidebar'
 import './editor.scss'
+import type { Renderer } from '../../canvas/engine'
 import type { TextLayer } from '../../features/text/text.service'
+import type { CanvasStageRef, EditorSnapshot, TextLayerMetadata } from './index'
 
 type Props = {
   activeTool: 'crop' | 'filter' | 'draw' | 'text' | null
   onSelectTool: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
-  filterState: { brightness: number; contrast: number; saturation: number }
-  onFilterChange: (next: { brightness: number; contrast: number; saturation: number }) => void
+  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
+  onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
   fileName: string | null
   onFileNameChange: (name: string | null) => void
-  timeline: { id: string; text: string; ts: number; snapshot?: any }[]
+  timeline: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }[]
   onTimeline: (text: string) => void
-  onTimelineClick?: (entry: { id: string; text: string; ts: number; snapshot?: any }) => void
-  rendererRef?: React.MutableRefObject<any>
+  onTimelineClick?: (entry: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }) => void
+  rendererRef?: React.MutableRefObject<CanvasStageRef | null>
   layers?: { id: string; name: string; w: number; h: number; visible?: boolean }[]
   activeLayerId?: string | null
   onActiveLayerChange?: (id: string | null) => void
   onLayersChange?: (layers: { id: string; name: string; w: number; h: number; visible?: boolean }[]) => void
-  textLayerMetadata?: { [layerId: string]: any }
-  onTextLayerMetadataChange?: (metadata: { [layerId: string]: any }) => void
-  onUpdateTextLayer?: (layerId: string, config: any) => Promise<void>
+  textLayerMetadata?: TextLayerMetadata
+  onTextLayerMetadataChange?: (metadata: TextLayerMetadata) => void
+  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<void>
   onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
   onUndo?: () => void
   onRedo?: () => void
   canUndo?: boolean
   canRedo?: boolean
+  onExport?: () => void
+  onReset?: () => void
+  canvasSize?: { width: number; height: number }
+  zoom?: number
+  onFileSelect?: (file: File) => void
 }
 
 export function EditorLayout({
@@ -56,48 +65,89 @@ export function EditorLayout({
   onUndo,
   onRedo,
   canUndo,
-  canRedo
+  canRedo,
+  onExport,
+  onReset,
+  canvasSize,
+  zoom = 100,
+  onFileSelect
 }: Props) {
-  const canvasStageRef = useRef<{
-    handleDrawConfig?: (color: string, size: number) => void
-    handleAddText?: (config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
-    handleCropConfirm?: () => void
-    handleLayerDelete?: (id: string) => void
-    handleLayerVisibilityToggle?: (id: string, visible: boolean) => void
-    handleLayerMove?: (id: string, direction: 'up' | 'down') => void
-    handleLayerDuplicate?: (id: string) => void
-    handleLayerScaleChange?: (id: string, scale: number) => void
-    handleLayerScaleChangeEnd?: (id: string, scale: number) => void
-    handleLayerRotationChange?: (id: string, rotation: number) => void
-    handleLayerRotationChangeEnd?: (id: string, rotation: number) => void
-    getRenderer?: () => any
-  }>({})
+  const canvasStageRef = useRef<CanvasStageRef | null>(null)
 
   const handleDrawConfig = (color: string, size: number) => {
-    canvasStageRef.current.handleDrawConfig?.(color, size)
+    canvasStageRef.current?.handleDrawConfig?.(color, size)
   }
 
   const handleAddText = (config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
-    canvasStageRef.current.handleAddText?.(config)
+    canvasStageRef.current?.handleAddText?.(config)
   }
 
   const handleCropConfirm = () => {
-    canvasStageRef.current.handleCropConfirm?.()
+    canvasStageRef.current?.handleCropConfirm?.()
   }
 
   // 将canvasStageRef传递给父组件
   useEffect(() => {
     if (rendererRef) {
-      rendererRef.current = canvasStageRef
+      rendererRef.current = canvasStageRef.current
     }
   }, [rendererRef])
 
   return (
     <div className="editor-layout">
-      <aside className="editor-sidebar">
-        <ToolSidebar activeTool={activeTool} onSelectTool={onSelectTool} />
-      </aside>
-      <main className="editor-canvas">
+      {/* 顶部操作栏 */}
+      <header className="editor-header">
+        <div className="editor-header-left">
+          <span className="px-4 py-2 text-sm text-slate-300">画布编辑区</span>
+          <ImageUploader onSelect={onFileSelect} />
+        </div>
+        <div className="editor-header-right">
+          <button
+            className="px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded transition disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="撤销 (Ctrl+Z)"
+          >
+            撤销
+          </button>
+          <button
+            className="px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded transition disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="重做 (Ctrl+Y)"
+          >
+            重做
+          </button>
+          <button
+            className="px-3 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded transition"
+            onClick={onExport}
+            title="导出图像"
+          >
+            导出
+          </button>
+          <button
+            className="px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded transition"
+            onClick={onReset}
+            title="重置编辑器"
+          >
+            重置
+          </button>
+        </div>
+      </header>
+
+      {/* 主体区域 */}
+      <div className="editor-body">
+        <aside className="editor-sidebar">
+          <ToolSidebar 
+            activeTool={activeTool} 
+            onSelectTool={onSelectTool}
+            onUndo={onUndo}
+            onRedo={onRedo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+          />
+        </aside>
+        <main className="editor-canvas">
         <CanvasStage
           ref={canvasStageRef}
           cropEnabled={activeTool === 'crop'}
@@ -166,7 +216,25 @@ export function EditorLayout({
           onTextLayerMetadataChange={onTextLayerMetadataChange}
           onUpdateTextLayer={onUpdateTextLayer}
         />
-      </section>
+        </section>
+      </div>
+
+      {/* 底部状态栏 */}
+      <footer className="editor-footer">
+        <div className="editor-footer-left">
+          {canvasSize && (
+            <span>
+              {canvasSize.width} × {canvasSize.height} 像素
+            </span>
+          )}
+        </div>
+        <div className="editor-footer-center">
+          <span>{layers?.length || 0} 个图层</span>
+        </div>
+        <div className="editor-footer-right">
+          <span>缩放: {zoom}%</span>
+        </div>
+      </footer>
     </div>
   )
 }

@@ -3,20 +3,40 @@
  * 提供图像渲染、缩放、平移、裁剪、滤镜等核心功能
  * 使用双层Canvas架构：背景层用于渲染图像，UI层用于绘制交互元素
  */
-type Vec2 = { x: number; y: number }
-export type FilterState = { brightness: number; contrast: number; saturation: number }
-type Layer = { 
+
+// ==================== 类型定义 ====================
+
+export type Vec2 = { x: number; y: number }
+
+export type FilterState = { 
+  brightness: number
+  contrast: number
+  saturation: number
+  hue: number
+  blur: number
+  sharpen: number
+}
+
+export type Layer = { 
   id: string
   name: string
   bitmap: ImageBitmap
   offset: Vec2
   visible: boolean
-  scale: number  // 图层缩放比例，默认1
-  rotation: number  // 图层旋转角度（度），默认0
+  /** 图层缩放比例，默认1 */
+  scale: number
+  /** 图层旋转角度（度），默认0 */
+  rotation: number
 }
+
 type CropRect = { x: number; y: number; w: number; h: number; rotation: number }
 
-const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max)
+// ==================== 工具函数 ====================
+
+/**
+ * 限制数值在指定范围内
+ */
+const clamp = (v: number, min: number, max: number): number => Math.min(Math.max(v, min), max)
 
 export type Renderer = ReturnType<typeof createRenderer>
 
@@ -27,7 +47,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
     offset: { x: 0, y: 0 } as Vec2,
     view: { w: 0, h: 0 },
     imgSize: { w: 0, h: 0 },
-    filter: { brightness: 100, contrast: 100, saturation: 100 } as FilterState
+    filter: { brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 } as FilterState
   }
 
   const dpr = window.devicePixelRatio || 1
@@ -243,12 +263,30 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
       const cy = h / 2 + offset.y
       const x = cx - drawW / 2
       const y = cy - drawH / 2
-      bgCtx.fillStyle = '#e2e8f0'
-      bgCtx.fillRect(0, 0, w, h)
-      const { brightness, contrast, saturation } = state.filter
-      bgCtx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`
+      
+      // 清空画布，让 CSS 背景的棋盘格显示出来
+      bgCtx.clearRect(0, 0, w, h)
+      
+      // 构建滤镜字符串
+      const { brightness, contrast, saturation, hue, blur, sharpen } = state.filter
+      const filters: string[] = []
+      if (brightness !== 100) filters.push(`brightness(${brightness}%)`)
+      // 锐化和对比度结合：锐化通过增加对比度来实现
+      const effectiveContrast = sharpen > 0 
+        ? contrast + (sharpen / 100) * 20 
+        : contrast
+      if (effectiveContrast !== 100) filters.push(`contrast(${effectiveContrast}%)`)
+      if (saturation !== 100) filters.push(`saturate(${saturation}%)`)
+      if (hue !== 0) filters.push(`hue-rotate(${hue}deg)`)
+      if (blur > 0) filters.push(`blur(${blur}px)`)
+      
+      // 应用滤镜到所有可见图层
       state.layers.forEach((layer) => {
         if (!layer.visible) return
+        
+        // 为每个图层单独应用滤镜（确保滤镜正确应用）
+        bgCtx.save()
+        bgCtx.filter = filters.length > 0 ? filters.join(' ') : 'none'
         // 计算图层在图像坐标系中的位置（考虑offset）
         const layerX = layer.offset.x
         const layerY = layer.offset.y
@@ -268,16 +306,15 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
         const scaledH = layerH * layer.scale * zoom
         
         // 应用图层变换（旋转和缩放）
-        bgCtx.save()
         bgCtx.translate(viewCenterX, viewCenterY)
         bgCtx.rotate((layer.rotation * Math.PI) / 180)
         bgCtx.drawImage(layer.bitmap, -scaledW / 2, -scaledH / 2, scaledW, scaledH)
-        bgCtx.restore()
+        bgCtx.restore() // 恢复滤镜和变换状态
       })
-      bgCtx.filter = 'none'
     } else {
-      bgCtx.fillStyle = '#f1f5f9'
-      bgCtx.fillRect(0, 0, w, h)
+      // 清空画布，让 CSS 背景的棋盘格显示出来
+      bgCtx.clearRect(0, 0, w, h)
+      
       uiCtx.fillStyle = '#94a3b8'
       uiCtx.font = '14px system-ui'
       uiCtx.textAlign = 'center'

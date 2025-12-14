@@ -3,6 +3,8 @@
  * 读取和处理图像文件的EXIF元数据信息
  */
 
+// ==================== 类型定义 ====================
+
 export type ExifData = {
   orientation?: number
   width?: number
@@ -10,8 +12,10 @@ export type ExifData = {
   make?: string
   model?: string
   dateTime?: string
-  [key: string]: any
+  [key: string]: unknown
 }
+
+// ==================== 函数实现 ====================
 
 /**
  * 从文件读取EXIF信息

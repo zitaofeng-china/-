@@ -4,6 +4,8 @@
  */
 import type { Renderer } from '../../canvas/engine'
 
+// ==================== 类型定义 ====================
+
 export type CropRect = {
   x: number
   y: number
@@ -11,6 +13,8 @@ export type CropRect = {
   h: number
   rotation: number
 }
+
+// ==================== 函数实现 ====================
 
 /**
  * 应用裁剪操作

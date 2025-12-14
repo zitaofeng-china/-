@@ -96,10 +96,20 @@ export async function exportImage(
   ctx.fillRect(0, 0, canvasW, canvasH)
 
   // 应用滤镜
-  const { brightness, contrast, saturation } = renderer.state.filter
-  ctx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`
+  const { brightness, contrast, saturation, hue, blur, sharpen } = renderer.state.filter
+  const filters: string[] = []
+  if (brightness !== 100) filters.push(`brightness(${brightness}%)`)
+  // 锐化和对比度结合：锐化通过增加对比度来实现
+  const effectiveContrast = sharpen > 0 
+    ? contrast + (sharpen / 100) * 20 
+    : contrast
+  if (effectiveContrast !== 100) filters.push(`contrast(${effectiveContrast}%)`)
+  if (saturation !== 100) filters.push(`saturate(${saturation}%)`)
+  if (hue !== 0) filters.push(`hue-rotate(${hue}deg)`)
+  if (blur > 0) filters.push(`blur(${blur}px)`)
+  ctx.filter = filters.length > 0 ? filters.join(' ') : 'none'
 
-  // 绘制所有可见图层（应用变换）
+  // 绘制所有可见图层（应用变换和滤镜）
   renderer.state.layers.forEach((layer) => {
     if (!layer.visible) return
     const { x, y } = layer.offset
@@ -113,15 +123,14 @@ export async function exportImage(
     const exportCenterX = centerX - offsetX
     const exportCenterY = centerY - offsetY
     
+    // 为每个图层单独应用滤镜（确保滤镜正确应用）
     ctx.save()
+    ctx.filter = filters.length > 0 ? filters.join(' ') : 'none'
     ctx.translate(exportCenterX, exportCenterY)
     ctx.rotate((layer.rotation * Math.PI) / 180)
     ctx.drawImage(layer.bitmap, -scaledW / 2, -scaledH / 2, scaledW, scaledH)
-    ctx.restore()
+    ctx.restore() // 恢复滤镜和变换状态
   })
-
-  // 重置滤镜
-  ctx.filter = 'none'
 
   // 转换为Blob并下载
   return new Promise<void>((resolve, reject) => {

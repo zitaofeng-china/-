@@ -4,6 +4,8 @@
  */
 import type { Renderer } from '../../canvas/engine'
 
+// ==================== 类型定义 ====================
+
 export type TextLayer = {
   id: string
   text: string
@@ -16,6 +18,8 @@ export type TextLayer = {
   bold: boolean
   italic: boolean
 }
+
+// ==================== 函数实现 ====================
 
 /**
  * 添加文本图层
