@@ -14,9 +14,9 @@ export function ImageUploader({ onSelect }: Props) {
     if (file) onSelect?.(file)
   }
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:border-blue-500">
+    <label className="image-uploader-button">
       <input type="file" accept="image/*" className="hidden" onChange={handleChange} />
-      <span>上传图片</span>
+      <span>打开图像</span>
     </label>
   )
 }

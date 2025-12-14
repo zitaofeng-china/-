@@ -1,21 +1,21 @@
-5/**
+/**
  * Canvas画布舞台组件
  * 核心画布组件，负责图像渲染、缩放、平移、裁剪等交互功能
  * 使用双层Canvas架构：背景层渲染图像，UI层绘制交互元素
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+
+import { Toast } from '../../components/Toast'
 import { createRenderer, type Renderer } from '../../canvas/engine'
-import { ImageUploader } from '../../components/ImageUploader'
-import { Button } from '../../components/ui/Button'
-import Slider from '../../components/ui/Slider'
+import { drawStroke, createStroke, type Point as DrawPoint } from '../../features/draw/draw.service'
+import { addTextLayer, getDefaultTextConfig, type TextLayer } from '../../features/text/text.service'
 import { useCanvasResize } from '../../hooks/useCanvasResize'
 import { useDrag } from '../../hooks/useDrag'
 import { useKeyPress } from '../../hooks/useKeyPress'
 import { exportImage } from '../../services/file.service'
-import { drawStroke, createStroke, type Point as DrawPoint } from '../../features/draw/draw.service'
-import { addTextLayer, getDefaultTextConfig, type TextLayer } from '../../features/text/text.service'
-import { Toast } from '../../components/Toast'
 import { debounce } from '../../utils/debounce'
+
+// ==================== 类型定义 ====================
 
 type Point = { x: number; y: number }
 type CropHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
@@ -26,7 +26,7 @@ type Props = {
   cropEnabled: boolean
   drawEnabled?: boolean
   textEnabled?: boolean
-  filterState: { brightness: number; contrast: number; saturation: number }
+  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
   onFilterChange: (next: { brightness: number; contrast: number; saturation: number }) => void
   onFileNameChange: (name: string | null) => void
   onTimeline: (text: string) => void
@@ -955,6 +955,11 @@ const CanvasStage = React.forwardRef<
     onTimeline(`调整图层旋转: ${Math.round(rotation)}°`)
   }, [onTimeline])
 
+  const applyCrop = useCallback((next: CropState) => {
+    setCrop(next)
+    rendererRef.current?.render()
+  }, [])
+
   // 通过ref暴露方法给父组件
   React.useImperativeHandle(
     ref,
@@ -973,9 +978,11 @@ const CanvasStage = React.forwardRef<
       handleLayerScaleChangeEnd: handleLayerScaleChangeEnd,
       handleLayerRotationChange: handleLayerRotationChange,
       handleLayerRotationChangeEnd: handleLayerRotationChangeEnd,
-      getRenderer: () => rendererRef.current
+      getRenderer: () => rendererRef.current,
+      getCrop: () => crop,
+      setCrop: applyCrop
     }),
-    [handleAddText, handleCropConfirm, handleLayerDelete, handleLayerVisibilityToggle, handleLayerMove, handleLayerDuplicate, handleLayerScaleChange, handleLayerScaleChangeEnd, handleLayerRotationChange, handleLayerRotationChangeEnd]
+    [handleAddText, handleCropConfirm, handleLayerDelete, handleLayerVisibilityToggle, handleLayerMove, handleLayerDuplicate, handleLayerScaleChange, handleLayerScaleChangeEnd, handleLayerRotationChange, handleLayerRotationChangeEnd, crop, applyCrop]
   )
 
   const hitTest = (viewPt: Point): Hit | null => {
@@ -1021,11 +1028,6 @@ const CanvasStage = React.forwardRef<
     startLocal?: Point
     startRotation?: number
   } | null>(null)
-
-  const applyCrop = (next: CropState) => {
-    setCrop(next)
-    rendererRef.current?.render()
-  }
 
   const onCropMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!cropEnabled || !crop || !rendererRef.current || rendererRef.current.state.layers.length === 0) return
@@ -1303,41 +1305,6 @@ const CanvasStage = React.forwardRef<
 
   return (
     <div className="editor-canvas-area">
-      <div className="canvas-toolbar glass">
-        <ImageUploader onSelect={handleUpload} />
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={fitImage}>
-            适配
-          </Button>
-          <Button variant="ghost" onClick={() => zoomStep(-10)}>
-            -
-          </Button>
-          <div className="w-48">
-            <Slider value={zoomPct} min={10} max={800} step={1} onChange={handleZoomChange} />
-          </div>
-          <Button variant="ghost" onClick={() => zoomStep(10)}>
-            +
-          </Button>
-          <span className="text-sm text-slate-600">{zoomPct}%</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={onUndo} disabled={!canUndo}>
-            撤销
-          </Button>
-          <Button variant="ghost" onClick={onRedo} disabled={!canRedo}>
-            重做
-          </Button>
-        </div>
-        <Button
-          variant="primary"
-          onClick={handleExport}
-          disabled={!rendererRef.current || rendererRef.current.state.layers.length === 0}
-        >
-          导出
-          </Button>
-        <div className="text-xs text-slate-500">{fileName ?? '未加载图片'}</div>
-      </div>
-
       <div
         ref={containerRef}
         className={`canvas-stack ${isDragging ? 'dragging' : ''}`}

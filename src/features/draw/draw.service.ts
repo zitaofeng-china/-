@@ -4,6 +4,8 @@
  */
 import type { Renderer } from '../../canvas/engine'
 
+// ==================== 类型定义 ====================
+
 export type Point = { x: number; y: number }
 
 export type DrawStroke = {
@@ -11,6 +13,8 @@ export type DrawStroke = {
   color: string
   size: number
 }
+
+// ==================== 函数实现 ====================
 
 /**
  * 在指定图层上绘制笔画

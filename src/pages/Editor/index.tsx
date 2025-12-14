@@ -2,15 +2,20 @@
  * 编辑器主页面组件
  * 图像编辑器的入口页面，管理编辑器的整体状态和工具切换
  */
-// src/pages/Editor/index.tsx
 import React, { useState } from 'react'
+
 import { EditorLayout } from './EditorLayout'
 import { resetHistory } from '../../features/history/history.service'
+import type { Renderer, Layer } from '../../canvas/engine'
 import type { TextLayer } from '../../features/text/text.service'
+
+// ==================== 类型定义 ====================
 
 type Tool = 'crop' | 'filter' | 'draw' | 'text' | null
 
-// 时间线条目类型，包含状态快照
+/**
+ * 时间线条目类型，包含状态快照
+ */
 export type TimelineEntry = {
   id: string
   text: string
@@ -18,16 +23,20 @@ export type TimelineEntry = {
   snapshot?: EditorSnapshot
 }
 
-// 编辑器状态快照（包含位图数据）
+/**
+ * 编辑器状态快照（包含位图数据）
+ */
 export type EditorSnapshot = {
-  filterState: { brightness: number; contrast: number; saturation: number }
+  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
   layers: LayerSnapshot[]
   activeLayerIndex: number
   fileName: string | null
   viewState: { zoom: number; offset: { x: number; y: number } }
 }
 
-// 图层状态快照，包含序列化位图
+/**
+ * 图层状态快照，包含序列化位图
+ */
 export type LayerSnapshot = {
   name: string
   offset: { x: number; y: number }
@@ -39,21 +48,73 @@ export type LayerSnapshot = {
   textConfig?: Omit<TextLayer, 'id' | 'x' | 'y'>
 }
 
-// 文本图层元数据存储（图层ID -> 文本属性）
-type TextLayerMetadata = {
+/**
+ * 文本图层元数据存储（图层ID -> 文本属性）
+ */
+export type TextLayerMetadata = {
   [layerId: string]: Omit<TextLayer, 'id' | 'x' | 'y'>
 }
 
-const MAX_TIMELINE = 40
-const isTimelineAllowed = (text: string) =>
+/**
+ * CanvasStage 组件的 ref 类型
+ */
+export type CanvasStageRef = {
+  getRenderer: () => Renderer | null
+  handleDrawConfig?: (color: string, size: number) => void
+  handleAddText?: (config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
+  handleCropConfirm?: () => void
+  handleLayerDelete?: (id: string) => void
+  handleLayerVisibilityToggle?: (id: string, visible: boolean) => void
+  handleLayerMove?: (id: string, direction: 'up' | 'down') => void
+  handleLayerDuplicate?: (id: string) => void
+  handleLayerScaleChange?: (id: string, scale: number) => void
+  handleLayerScaleChangeEnd?: (id: string, scale: number) => void
+  handleLayerRotationChange?: (id: string, rotation: number) => void
+  handleLayerRotationChangeEnd?: (id: string, rotation: number) => void
+  getCrop?: () => { x: number; y: number; w: number; h: number; rotation: number } | null
+  setCrop?: (crop: { x: number; y: number; w: number; h: number; rotation: number }) => void
+}
+
+// ==================== 常量定义 ====================
+
+/** 最大历史记录数量 */
+const MAX_HISTORY_COUNT = 40
+
+/** 最大历史记录体积（字节），25MB 软上限 */
+const MAX_HISTORY_BYTES = 25 * 1024 * 1024
+
+// ==================== 工具函数 ====================
+
+/**
+ * 判断时间线条目是否允许显示
+ */
+const isTimelineAllowed = (text: string): boolean =>
   text.startsWith('切换到') ||
   text === '关闭工具' ||
   text.startsWith('手动保存') ||
   text.startsWith('快捷键保存')
 
+/**
+ * 估算快照占用的字节数
+ * @param snapshot 编辑器快照
+ * @returns 估算的字节数（粗估：base64长度 * 0.75）
+ */
+const estimateSnapshotBytes = (snapshot?: EditorSnapshot): number => {
+  if (!snapshot) return 0
+  
+  const dataUrlSize = (dataUrl: string): number => 
+    Math.max(0, dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75
+  
+  let total = 0
+  snapshot.layers.forEach((l: LayerSnapshot) => {
+    total += dataUrlSize(l.bitmapDataUrl)
+  })
+  return total
+}
+
 export default function Editor() {
   const [activeTool, setActiveTool] = useState<Tool>(null)
-  const [filterState, setFilterState] = useState({ brightness: 100, contrast: 100, saturation: 100 })
+  const [filterState, setFilterState] = useState({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 })
   const [fileName, setFileName] = useState<string | null>(null)
   // history：用于撤销/重做的完整快照栈；timeline：用于展示的精简记录
   const [history, setHistory] = useState<TimelineEntry[]>([])
@@ -63,11 +124,16 @@ export default function Editor() {
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null)
   const [textLayerMetadata, setTextLayerMetadata] = useState<TextLayerMetadata>({})
   const filterLogGate = React.useRef(0)
-  const rendererRef = React.useRef<any>(null) // 用于保存renderer引用
+  const rendererRef = React.useRef<CanvasStageRef | null>(null)
+  const historyBytesRef = React.useRef<number>(0)
 
-  // 创建状态快照（包含每个图层位图的dataURL）
+  // ==================== 组件内部函数 ====================
+
+  /**
+   * 创建状态快照（包含每个图层位图的dataURL）
+   */
   const createSnapshot = (): EditorSnapshot | null => {
-    const renderer = rendererRef.current?.current?.getRenderer?.()
+    const renderer = rendererRef.current?.getRenderer?.()
     
     // 即使没有renderer，也创建一个基本快照（用于记录状态）
     if (!renderer) {
@@ -83,10 +149,10 @@ export default function Editor() {
       }
     }
 
-    const layers = renderer.state.layers as any[]
+    const layers = renderer.state.layers
     const activeLayerIndex = layers.findIndex((l) => l.id === activeLayerId)
 
-    const layerSnapshots: LayerSnapshot[] = layers.map((layer) => {
+    const layerSnapshots: LayerSnapshot[] = layers.map((layer: Layer) => {
       // 将当前layer的bitmap序列化为dataURL
       const canvas = document.createElement('canvas')
       canvas.width = layer.bitmap.width
@@ -125,9 +191,11 @@ export default function Editor() {
     }
   }
 
-  // 恢复状态快照
-  const restoreSnapshot = async (snapshot: EditorSnapshot) => {
-    const renderer = rendererRef.current?.current?.getRenderer?.()
+  /**
+   * 恢复状态快照
+   */
+  const restoreSnapshot = async (snapshot: EditorSnapshot): Promise<void> => {
+    const renderer = rendererRef.current?.getRenderer?.()
     if (!renderer) {
       console.warn('无法恢复：renderer未初始化')
       setFilterState(snapshot.filterState)
@@ -141,7 +209,7 @@ export default function Editor() {
     try {
       // 清空现有图层
       const existing = [...renderer.state.layers]
-      existing.forEach((l: any) => renderer.deleteLayer(l.id))
+      existing.forEach((l: Layer) => renderer.deleteLayer(l.id))
 
       // 恢复滤镜状态
       setFilterState(snapshot.filterState)
@@ -182,7 +250,7 @@ export default function Editor() {
       setTextLayerMetadata(newMetadata)
       const currentLayers = renderer.state.layers
       setLayers(
-        currentLayers.map((l: any) => ({
+        currentLayers.map((l: Layer) => ({
           id: l.id,
           name: l.name,
           w: l.bitmap.width,
@@ -231,10 +299,27 @@ export default function Editor() {
       const withoutRedo =
         baseIndex >= 0 && baseIndex < prev.length - 1 ? prev.slice(0, baseIndex + 1) : prev
 
-      const appended = [...withoutRedo, entry]
-      const overflow = appended.length > MAX_TIMELINE ? appended.length - MAX_TIMELINE : 0
-      const trimmed = overflow > 0 ? appended.slice(overflow) : appended
+      let appended = [...withoutRedo, entry]
 
+      // 按数量和体积双重约束修剪
+      const calcBytes = (arr: TimelineEntry[]) =>
+        arr.reduce((sum, it) => sum + estimateSnapshotBytes(it.snapshot), 0)
+
+      // 先按数量裁剪到最多 MAX_HISTORY_COUNT 条
+      if (appended.length > MAX_HISTORY_COUNT) {
+        const overflow = appended.length - MAX_HISTORY_COUNT
+        appended = appended.slice(overflow)
+      }
+
+      // 再按字节上限裁剪（从最旧开始剔除）
+      let bytes = calcBytes(appended)
+      while (bytes > MAX_HISTORY_BYTES && appended.length > 1) {
+        appended = appended.slice(1)
+        bytes = calcBytes(appended)
+      }
+      historyBytesRef.current = bytes
+
+      const trimmed = appended
       const newIndex = trimmed.length - 1
       setHistoryIndex(newIndex)
       // 同步可见时间线（只保留 allowed 的记录）
@@ -327,7 +412,7 @@ export default function Editor() {
   const handleReset = () => {
     resetHistory()
     setActiveTool(null)
-    setFilterState({ brightness: 100, contrast: 100, saturation: 100 })
+    setFilterState({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 })
     setFileName(null)
     setTimeline([])
     setHistory([])
@@ -335,8 +420,54 @@ export default function Editor() {
     addTimeline('已重置编辑器与历史')
   }
 
+  const handleExport = React.useCallback(async () => {
+    const renderer = rendererRef.current?.getRenderer?.()
+    if (!renderer) {
+      console.warn('无法导出：renderer未初始化')
+      return
+    }
+    try {
+      const { exportImage } = await import('../../services/file.service')
+      await exportImage(renderer, fileName || '图像编辑器.png')
+      addTimeline('导出图像')
+    } catch (error) {
+      console.error('导出失败:', error)
+    }
+  }, [fileName, addTimeline])
+
+  const handleFileSelect = React.useCallback(async (file: File) => {
+    const renderer = rendererRef.current?.getRenderer?.()
+    if (!renderer) {
+      console.warn('无法加载图像：renderer未初始化')
+      return
+    }
+    try {
+      setFileName(file.name)
+      await renderer.loadImage(file)
+      const sizes = renderer.state.layers.map((l: Layer) => ({
+        id: l.id,
+        name: l.name,
+        w: l.bitmap.width,
+        h: l.bitmap.height,
+        visible: l.visible
+      }))
+      setLayers(sizes)
+      if (sizes.length > 0) {
+        setActiveLayerId(sizes[sizes.length - 1].id)
+      }
+      renderer.fitToView()
+      addTimeline(`上传图片：${file.name}`)
+    } catch (error) {
+      console.error('加载图像失败:', error)
+    }
+  }, [addTimeline])
+
+  const renderer = rendererRef.current?.getRenderer?.()
+  const canvasSize = renderer?.state.imgSize
+  const zoom = renderer ? Math.round(renderer.state.zoom * 100) : 100
+
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="editor-container" style={{ height: '100vh', overflow: 'hidden' }}>
       <EditorLayout
         activeTool={activeTool}
         onSelectTool={handleSelectTool}
@@ -369,7 +500,7 @@ export default function Editor() {
         textLayerMetadata={textLayerMetadata}
         onTextLayerMetadataChange={setTextLayerMetadata}
         onUpdateTextLayer={async (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
-          const renderer = rendererRef.current?.current?.getRenderer?.()
+          const renderer = rendererRef.current?.getRenderer?.()
           if (!renderer) return
           try {
             const { updateTextLayer } = await import('../../features/text/text.service')
@@ -383,7 +514,7 @@ export default function Editor() {
               })
               
               // 找到新创建的图层（通过名称匹配，因为updateTextLayer会创建新图层）
-              const newLayer = renderer.state.layers.find((l: any) => 
+              const newLayer = renderer.state.layers.find((l: Layer) => 
                 l.name.startsWith('Text:') && l.name.includes(config.text.substring(0, Math.min(10, config.text.length)))
               )
               
@@ -409,7 +540,7 @@ export default function Editor() {
               }
               
               // 同步图层列表
-              const updatedLayers = renderer.state.layers.map((l: any) => ({
+              const updatedLayers = renderer.state.layers.map((l: Layer) => ({
                 id: l.id,
                 name: l.name,
                 w: l.bitmap.width,
@@ -427,6 +558,11 @@ export default function Editor() {
         onTextLayerCreated={(layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
           setTextLayerMetadata((prev) => ({ ...prev, [layerId]: config }))
         }}
+        onExport={handleExport}
+        onReset={handleReset}
+        canvasSize={canvasSize ? { width: canvasSize.w, height: canvasSize.h } : undefined}
+        zoom={zoom}
+        onFileSelect={handleFileSelect}
       />
     </div>
   )

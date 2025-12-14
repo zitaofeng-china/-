@@ -4,11 +4,15 @@
  */
 import type { Renderer } from '../../canvas/engine'
 
+// ==================== 类型定义 ====================
+
 export type FilterState = {
   brightness: number
   contrast: number
   saturation: number
 }
+
+// ==================== 函数实现 ====================
 
 /**
  * 应用滤镜效果
