@@ -10,13 +10,16 @@ type Props = {
   min?: number
   max?: number
   step?: number
+  disabled?: boolean
   onChange: (value: number) => void
   onChangeEnd?: () => void
 }
 
-export default function Slider({ value, min = 0, max = 100, step = 1, onChange, onChangeEnd }: Props) {
+export default function Slider({ value, min = 0, max = 100, step = 1, disabled = false, onChange, onChangeEnd }: Props) {
   const handleWheel = (e: React.WheelEvent<HTMLInputElement>) => {
-    e.preventDefault()
+    if (e.cancelable) {
+      e.preventDefault()
+    }
     e.stopPropagation()
     
     // 根据滚轮方向调整值
@@ -37,10 +40,11 @@ export default function Slider({ value, min = 0, max = 100, step = 1, onChange, 
       min={min}
       max={max}
       step={step}
-      onChange={(e) => onChange(Number(e.target.value))}
+      disabled={disabled}
+      onChange={(e) => !disabled && onChange(Number(e.target.value))}
       onMouseUp={onChangeEnd}
       onTouchEnd={onChangeEnd}
-      onWheel={handleWheel}
+      onWheel={disabled ? undefined : handleWheel}
     />
   )
 }

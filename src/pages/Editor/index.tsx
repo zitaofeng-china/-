@@ -6,74 +6,20 @@ import React, { useState } from 'react'
 
 import { EditorLayout } from './EditorLayout'
 import { resetHistory } from '../../features/history/history.service'
-import type { Renderer, Layer } from '../../canvas/engine'
-import type { TextLayer } from '../../features/text/text.service'
-
-// ==================== 类型定义 ====================
-
-type Tool = 'crop' | 'filter' | 'draw' | 'text' | null
-
-/**
- * 时间线条目类型，包含状态快照
- */
-export type TimelineEntry = {
-  id: string
-  text: string
-  ts: number
-  snapshot?: EditorSnapshot
-}
-
-/**
- * 编辑器状态快照（包含位图数据）
- */
-export type EditorSnapshot = {
-  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
-  layers: LayerSnapshot[]
-  activeLayerIndex: number
-  fileName: string | null
-  viewState: { zoom: number; offset: { x: number; y: number } }
-}
-
-/**
- * 图层状态快照，包含序列化位图
- */
-export type LayerSnapshot = {
-  name: string
-  offset: { x: number; y: number }
-  visible: boolean
-  scale: number
-  rotation: number
-  bitmapDataUrl: string
-  isTextLayer?: boolean
-  textConfig?: Omit<TextLayer, 'id' | 'x' | 'y'>
-}
-
-/**
- * 文本图层元数据存储（图层ID -> 文本属性）
- */
-export type TextLayerMetadata = {
-  [layerId: string]: Omit<TextLayer, 'id' | 'x' | 'y'>
-}
-
-/**
- * CanvasStage 组件的 ref 类型
- */
-export type CanvasStageRef = {
-  getRenderer: () => Renderer | null
-  handleDrawConfig?: (color: string, size: number) => void
-  handleAddText?: (config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
-  handleCropConfirm?: () => void
-  handleLayerDelete?: (id: string) => void
-  handleLayerVisibilityToggle?: (id: string, visible: boolean) => void
-  handleLayerMove?: (id: string, direction: 'up' | 'down') => void
-  handleLayerDuplicate?: (id: string) => void
-  handleLayerScaleChange?: (id: string, scale: number) => void
-  handleLayerScaleChangeEnd?: (id: string, scale: number) => void
-  handleLayerRotationChange?: (id: string, rotation: number) => void
-  handleLayerRotationChangeEnd?: (id: string, rotation: number) => void
-  getCrop?: () => { x: number; y: number; w: number; h: number; rotation: number } | null
-  setCrop?: (crop: { x: number; y: number; w: number; h: number; rotation: number }) => void
-}
+import { mapRendererLayersToUI } from '../../utils/layer-utils'
+import { useRenderer } from '../../hooks/useRenderer'
+import type {
+  EditorTool,
+  EditorSnapshot,
+  LayerSnapshot,
+  TextLayerMetadata,
+  CanvasStageRef,
+  Renderer,
+  RendererLayer,
+  TimelineEntry
+} from '../../types'
+import type { UILayer } from '../../types/layer'
+import type { TextLayer } from '../../types/tool'
 
 // ==================== 常量定义 ====================
 
@@ -113,18 +59,19 @@ const estimateSnapshotBytes = (snapshot?: EditorSnapshot): number => {
 }
 
 export default function Editor() {
-  const [activeTool, setActiveTool] = useState<Tool>(null)
+  const [activeTool, setActiveTool] = useState<EditorTool>(null)
   const [filterState, setFilterState] = useState({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 })
   const [fileName, setFileName] = useState<string | null>(null)
   // history：用于撤销/重做的完整快照栈；timeline：用于展示的精简记录
   const [history, setHistory] = useState<TimelineEntry[]>([])
   const [historyIndex, setHistoryIndex] = useState<number>(-1)
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
-  const [layers, setLayers] = useState<{ id: string; name: string; w: number; h: number; visible?: boolean }[]>([])
+  const [layers, setLayers] = useState<UILayer[]>([])
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null)
   const [textLayerMetadata, setTextLayerMetadata] = useState<TextLayerMetadata>({})
   const filterLogGate = React.useRef(0)
   const rendererRef = React.useRef<CanvasStageRef | null>(null)
+  const { getRenderer } = useRenderer(rendererRef)
   const historyBytesRef = React.useRef<number>(0)
 
   // ==================== 组件内部函数 ====================
@@ -133,7 +80,7 @@ export default function Editor() {
    * 创建状态快照（包含每个图层位图的dataURL）
    */
   const createSnapshot = (): EditorSnapshot | null => {
-    const renderer = rendererRef.current?.getRenderer?.()
+    const renderer = getRenderer()
     
     // 即使没有renderer，也创建一个基本快照（用于记录状态）
     if (!renderer) {
@@ -152,7 +99,7 @@ export default function Editor() {
     const layers = renderer.state.layers
     const activeLayerIndex = layers.findIndex((l) => l.id === activeLayerId)
 
-    const layerSnapshots: LayerSnapshot[] = layers.map((layer: Layer) => {
+    const layerSnapshots: LayerSnapshot[] = layers.map((layer: RendererLayer) => {
       // 将当前layer的bitmap序列化为dataURL
       const canvas = document.createElement('canvas')
       canvas.width = layer.bitmap.width
@@ -173,6 +120,9 @@ export default function Editor() {
         visible: layer.visible,
         scale: layer.scale,
         rotation: layer.rotation,
+        opacity: layer.opacity,
+        blendMode: layer.blendMode,
+        locked: layer.locked,
         bitmapDataUrl,
         isTextLayer,
         textConfig
@@ -195,7 +145,7 @@ export default function Editor() {
    * 恢复状态快照
    */
   const restoreSnapshot = async (snapshot: EditorSnapshot): Promise<void> => {
-    const renderer = rendererRef.current?.getRenderer?.()
+    const renderer = getRenderer()
     if (!renderer) {
       console.warn('无法恢复：renderer未初始化')
       setFilterState(snapshot.filterState)
@@ -209,7 +159,7 @@ export default function Editor() {
     try {
       // 清空现有图层
       const existing = [...renderer.state.layers]
-      existing.forEach((l: Layer) => renderer.deleteLayer(l.id))
+      existing.forEach((l: RendererLayer) => renderer.deleteLayer(l.id))
 
       // 恢复滤镜状态
       setFilterState(snapshot.filterState)
@@ -226,6 +176,9 @@ export default function Editor() {
         renderer.setLayerVisibility(addedLayer.id, layerSnapshot.visible)
         renderer.setLayerScale(addedLayer.id, layerSnapshot.scale)
         renderer.setLayerRotation(addedLayer.id, layerSnapshot.rotation)
+        renderer.setLayerOpacity(addedLayer.id, layerSnapshot.opacity ?? 1)
+        renderer.setLayerBlendMode(addedLayer.id, layerSnapshot.blendMode ?? 'source-over')
+        renderer.setLayerLocked(addedLayer.id, layerSnapshot.locked ?? false)
         // 如果有文本配置，记录新的layerId对应的配置
         if (layerSnapshot.isTextLayer && layerSnapshot.textConfig) {
           newMetadata[addedLayer.id] = layerSnapshot.textConfig
@@ -249,15 +202,7 @@ export default function Editor() {
       // 同步元数据和图层列表
       setTextLayerMetadata(newMetadata)
       const currentLayers = renderer.state.layers
-      setLayers(
-        currentLayers.map((l: Layer) => ({
-          id: l.id,
-          name: l.name,
-          w: l.bitmap.width,
-          h: l.bitmap.height,
-          visible: l.visible
-        }))
-      )
+      setLayers(mapRendererLayersToUI(currentLayers))
     } catch (error) {
       console.error('恢复状态时出错:', error)
     }
@@ -400,7 +345,7 @@ export default function Editor() {
     return () => window.removeEventListener('keydown', listener)
   }, [handleUndo, handleRedo, addTimeline])
 
-  const handleSelectTool = (tool: Tool) => {
+  const handleSelectTool = (tool: EditorTool) => {
     setActiveTool(tool)
     if (tool === 'crop') addTimeline('切换到裁剪工具')
     else if (tool === 'filter') addTimeline('切换到滤镜工具')
@@ -421,7 +366,7 @@ export default function Editor() {
   }
 
   const handleExport = React.useCallback(async () => {
-    const renderer = rendererRef.current?.getRenderer?.()
+    const renderer = getRenderer()
     if (!renderer) {
       console.warn('无法导出：renderer未初始化')
       return
@@ -436,7 +381,7 @@ export default function Editor() {
   }, [fileName, addTimeline])
 
   const handleFileSelect = React.useCallback(async (file: File) => {
-    const renderer = rendererRef.current?.getRenderer?.()
+    const renderer = getRenderer()
     if (!renderer) {
       console.warn('无法加载图像：renderer未初始化')
       return
@@ -444,13 +389,7 @@ export default function Editor() {
     try {
       setFileName(file.name)
       await renderer.loadImage(file)
-      const sizes = renderer.state.layers.map((l: Layer) => ({
-        id: l.id,
-        name: l.name,
-        w: l.bitmap.width,
-        h: l.bitmap.height,
-        visible: l.visible
-      }))
+      const sizes = mapRendererLayersToUI(renderer.state.layers)
       setLayers(sizes)
       if (sizes.length > 0) {
         setActiveLayerId(sizes[sizes.length - 1].id)
@@ -462,7 +401,7 @@ export default function Editor() {
     }
   }, [addTimeline])
 
-  const renderer = rendererRef.current?.getRenderer?.()
+  const renderer = getRenderer()
   const canvasSize = renderer?.state.imgSize
   const zoom = renderer ? Math.round(renderer.state.zoom * 100) : 100
 
@@ -500,53 +439,34 @@ export default function Editor() {
         textLayerMetadata={textLayerMetadata}
         onTextLayerMetadataChange={setTextLayerMetadata}
         onUpdateTextLayer={async (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
-          const renderer = rendererRef.current?.getRenderer?.()
+          const renderer = getRenderer()
           if (!renderer) return
           try {
             const { updateTextLayer } = await import('../../features/text/text.service')
             const layer = renderer.getLayer(layerId)
             if (layer) {
-              // 更新文本图层（updateTextLayer内部会处理位置和属性）
-              await updateTextLayer(renderer, layerId, {
+              // 更新文本图层，直接获取新图层 ID
+              const newLayerId = await updateTextLayer(renderer, layerId, {
                 ...config,
                 x: 0, // 这些值会被updateTextLayer内部计算
                 y: 0
               })
               
-              // 找到新创建的图层（通过名称匹配，因为updateTextLayer会创建新图层）
-              const newLayer = renderer.state.layers.find((l: Layer) => 
-                l.name.startsWith('Text:') && l.name.includes(config.text.substring(0, Math.min(10, config.text.length)))
-              )
+              // 更新元数据映射（使用新图层ID）
+              setTextLayerMetadata((prev) => {
+                const newMetadata = { ...prev }
+                delete newMetadata[layerId]
+                newMetadata[newLayerId] = config
+                return newMetadata
+              })
               
-              if (newLayer) {
-                // 更新元数据映射（使用新图层ID）
-                setTextLayerMetadata((prev) => {
-                  const newMetadata = { ...prev }
-                  delete newMetadata[layerId]
-                  newMetadata[newLayer.id] = config
-                  return newMetadata
-                })
-                
-                // 如果更新的是当前选中的图层，更新activeLayerId
-                if (layerId === activeLayerId) {
-                  setActiveLayerId(newLayer.id)
-                }
-                
-                // 通知 CanvasStage 更新编辑中的图层ID（如果正在编辑该图层）
-                // 通过更新 textLayerMetadata 来触发，CanvasStage 会通过 useEffect 检测到变化
-              } else {
-                // 如果找不到新图层，保持原有映射
-                setTextLayerMetadata((prev) => ({ ...prev, [layerId]: config }))
+              // 如果更新的是当前选中的图层，更新activeLayerId
+              if (layerId === activeLayerId) {
+                setActiveLayerId(newLayerId)
               }
               
               // 同步图层列表
-              const updatedLayers = renderer.state.layers.map((l: Layer) => ({
-                id: l.id,
-                name: l.name,
-                w: l.bitmap.width,
-                h: l.bitmap.height,
-                visible: l.visible
-              }))
+              const updatedLayers = mapRendererLayersToUI(renderer.state.layers)
               setLayers(updatedLayers)
               
               addTimeline(`更新文本：${config.text}`)
@@ -557,6 +477,22 @@ export default function Editor() {
         }}
         onTextLayerCreated={(layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
           setTextLayerMetadata((prev) => ({ ...prev, [layerId]: config }))
+        }}
+        onTextLayerIdUpdate={(oldLayerId: string, newLayerId: string) => {
+          // 当CanvasStage检测到文本图层ID变化时，同步更新元数据映射
+          // 这确保了编辑状态的连贯性
+          setTextLayerMetadata((prev) => {
+            const newMetadata = { ...prev }
+            if (newMetadata[oldLayerId]) {
+              newMetadata[newLayerId] = newMetadata[oldLayerId]
+              delete newMetadata[oldLayerId]
+            }
+            return newMetadata
+          })
+          // 如果旧图层ID是当前选中的图层，更新activeLayerId
+          if (oldLayerId === activeLayerId) {
+            setActiveLayerId(newLayerId)
+          }
         }}
         onExport={handleExport}
         onReset={handleReset}

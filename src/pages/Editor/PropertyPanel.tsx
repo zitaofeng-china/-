@@ -2,32 +2,39 @@
  * 属性面板组件
  * 显示当前选中工具的属性配置和编辑器状态信息，包括图层列表和时间线
  */
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 
 import Slider from '../../components/ui/Slider'
 import { CropTool } from '../../features/crop/CropTool'
 import { DrawTool } from '../../features/draw/DrawTool'
 import { FilterTool } from '../../features/filter/FilterTool'
 import { TextTool } from '../../features/text/TextTool'
-import type { Renderer } from '../../canvas/engine'
-import type { TextLayer } from '../../features/text/text.service'
-import type { EditorSnapshot, TextLayerMetadata } from './index'
+import { getDefaultTextConfig } from '../../features/text/text.service'
+import { isLayerVisible } from '../../utils/layer-utils'
+import { useRenderer } from '../../hooks/useRenderer'
+import type {
+  EditorTool,
+  EditorSnapshot,
+  TextLayerMetadata,
+  Renderer,
+  RendererRef
+} from '../../types'
+import type { UILayer } from '../../types/layer'
+import type { TextLayer } from '../../types/tool'
 
 type Props = {
-  activeTool: 'crop' | 'filter' | 'draw' | 'text' | null
+  activeTool: EditorTool
   filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
   onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
-  onSelectTool: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
+  onSelectTool: (tool: EditorTool) => void
+  cropState?: { x: number; y: number; w: number; h: number; rotation: number } | null
+  onCropChange?: (crop: { x: number; y: number; w: number; h: number; rotation: number } | null) => void
   fileName: string | null
   timeline: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }[]
   onTimeline: (text: string) => void
   onTimelineClick?: (entry: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }) => void
-  rendererRef?: React.MutableRefObject<{ 
-    getRenderer: () => Renderer | null
-    getCrop?: () => { x: number; y: number; w: number; h: number; rotation: number } | null
-    setCrop?: (crop: { x: number; y: number; w: number; h: number; rotation: number }) => void
-  } | null>
-  layers?: { id: string; name: string; w: number; h: number; visible?: boolean }[]
+  rendererRef?: RendererRef
+  layers?: UILayer[]
   activeLayerId?: string | null
   onActiveLayerChange?: (id: string | null) => void
   onCropConfirm?: () => void
@@ -41,10 +48,13 @@ type Props = {
   onLayerScaleChangeEnd?: (id: string, scale: number) => void
   onLayerRotationChange?: (id: string, rotation: number) => void
   onLayerRotationChangeEnd?: (id: string, rotation: number) => void
-  renderer?: Renderer | null
+  onLayerOpacityChange?: (id: string, opacity: number) => void
+  onLayerBlendModeChange?: (id: string, blendMode: GlobalCompositeOperation) => void
+  onLayerLockedChange?: (id: string, locked: boolean) => void
+  onAddLayer?: () => void
   textLayerMetadata?: TextLayerMetadata
   onTextLayerMetadataChange?: (metadata: TextLayerMetadata) => void
-  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<void>
+  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<string | void>
 }
 
 type TabKey = 'adjust' | 'filter' | 'layers' | 'history'
@@ -54,6 +64,8 @@ export function PropertyPanel({
   filterState,
   onFilterChange,
   onSelectTool,
+  cropState,
+  onCropChange,
   fileName,
   timeline,
   onTimeline,
@@ -73,13 +85,26 @@ export function PropertyPanel({
   onLayerScaleChangeEnd,
   onLayerRotationChange,
   onLayerRotationChangeEnd,
-  renderer,
+  onLayerOpacityChange,
+  onLayerBlendModeChange,
+  onLayerLockedChange,
+  onAddLayer,
   textLayerMetadata = {},
   onTextLayerMetadataChange,
   onUpdateTextLayer
 }: Props) {
+  // 当选择裁剪、画笔或文字工具时，自动切换到"调整"标签页
   const [activeTab, setActiveTab] = useState<TabKey>('adjust')
-  const activeLayer = activeLayerId && renderer ? renderer.getLayer(activeLayerId) : null
+  
+  useEffect(() => {
+    if (activeTool === 'crop' || activeTool === 'draw' || activeTool === 'text') {
+      setActiveTab('adjust')
+    }
+  }, [activeTool])
+  
+  const { getRenderer } = useRenderer(rendererRef)
+  const currentRenderer = getRenderer()
+  const activeLayer = activeLayerId && currentRenderer ? currentRenderer.getLayer(activeLayerId) : null
   const isTextLayer = activeLayer && activeLayer.name.startsWith('Text:')
   const activeTextMetadata = activeLayerId && isTextLayer ? textLayerMetadata[activeLayerId] : null
 
@@ -194,6 +219,64 @@ export function PropertyPanel({
 
   // 调整面板内容
   const renderAdjustPanel = () => {
+    // 如果选择了裁剪工具，显示裁剪属性
+    if (activeTool === 'crop') {
+      const renderer = getRenderer()
+      const imgSize = renderer?.state.imgSize || { w: 0, h: 0 }
+      const imageSize = { width: imgSize.w, height: imgSize.h }
+      
+      return (
+        <div className="property-panel-content">
+          <CropTool
+            onConfirm={onCropConfirm}
+            onCancel={() => onSelectTool(null)}
+            crop={cropState ?? (rendererRef?.current?.getCrop?.() || null)}
+            onCropChange={(newCrop) => {
+              rendererRef?.current?.setCrop?.(newCrop)
+              onCropChange?.(newCrop)
+            }}
+            imageSize={imageSize}
+          />
+        </div>
+      )
+    }
+
+    // 如果选择了画笔工具，显示画笔属性
+    if (activeTool === 'draw') {
+      return (
+        <div className="property-panel-content">
+          <DrawTool
+            onDrawStart={onDrawConfig}
+            onDrawEnd={() => {}}
+          />
+        </div>
+      )
+    }
+
+    // 如果选择了文字工具或当前选中文本图层，显示文字属性
+    if (activeTool === 'text' || isTextLayer) {
+      const fallbackTextConfig = activeTextMetadata || (isTextLayer
+        ? {
+            ...getDefaultTextConfig(),
+            text: (activeLayer?.name?.replace(/^Text:\s*/, '') || getDefaultTextConfig().text)
+          }
+        : undefined)
+
+      return (
+        <div className="property-panel-content">
+          <TextTool
+            onAddText={onAddText}
+            onChange={isTextLayer && activeLayerId ? (config) => {
+              onUpdateTextLayer?.(activeLayerId, config)
+            } : undefined}
+            initialConfig={fallbackTextConfig}
+            isEditMode={!!(isTextLayer && activeLayerId)}
+          />
+        </div>
+      )
+    }
+
+    // 默认显示图像调整属性
     const adjustState = {
       brightness: filterState.brightness - 100,
       contrast: filterState.contrast - 100,
@@ -346,68 +429,147 @@ export function PropertyPanel({
 
   // 图层面板内容
   const renderLayersPanel = () => {
+    // 使用 rendererRef 获取最新的 renderer，确保能获取到隐藏的图层
+    const currentRenderer = getRenderer()
+    const activeLayerOpacity = activeLayer ? Math.round(activeLayer.opacity * 100) : 100
+    const activeLayerBlendMode = activeLayer?.blendMode || 'source-over'
+    const activeLayerLocked = activeLayer?.locked || false
+    
     return (
       <div className="property-panel-content">
         <div className="property-panel-header">
           <h3 className="property-panel-title">图层</h3>
-          <button className="property-icon-button" title="添加图层">+</button>
+          <button 
+            className="property-icon-button" 
+            title="添加图层"
+            onClick={(e) => {
+              e.stopPropagation()
+              onAddLayer?.()
+            }}
+          >
+            +
+          </button>
         </div>
         <div className="layers-list">
           {layers.length === 0 && (
             <div className="layers-empty">暂无图层</div>
           )}
-          {layers.slice().reverse().map((l, reverseIdx) => {
-            const idx = layers.length - 1 - reverseIdx
-            const isVisible = l.visible !== false
+          {layers.slice().reverse().map((l) => {
+            // 移除未使用的 idx 变量
+            const isVisible = isLayerVisible(l.visible)
             const isActive = l.id === activeLayerId
+            const layer = currentRenderer?.getLayer(l.id)
+            const isLocked = layer?.locked || false
+            
             return (
               <div
                 key={l.id}
-                className={`layer-item ${isActive ? 'active' : ''} ${!isVisible ? 'hidden' : ''}`}
-                onClick={() => onActiveLayerChange?.(l.id)}
+                className={`layer-item ${isActive ? 'active' : ''} ${!isVisible ? 'hidden' : ''} ${isLocked ? 'locked' : ''}`}
+                onClick={() => {
+                  // 即使锁定也可以选中，只是不能移动等操作
+                  onActiveLayerChange?.(l.id)
+                }}
               >
                 <div className="layer-header">
-                  <span className="layer-icon">○</span>
+                  <button
+                    className="layer-visibility-button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onLayerVisibilityToggle?.(l.id, !isVisible)
+                    }}
+                    title={isVisible ? '隐藏图层' : '显示图层'}
+                  >
+                    {isVisible ? '👁' : '👁‍🗨'}
+                  </button>
                   <div className="layer-info">
                     <div className="layer-name">{l.name}</div>
                     <div className="layer-size">{l.w} × {l.h}</div>
                   </div>
-                  {isActive && <span className="layer-lock">🔒</span>}
+                  <button
+                    className={`layer-lock-button ${isLocked ? 'locked' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onLayerLockedChange?.(l.id, !isLocked)
+                    }}
+                    title={isLocked ? '解锁' : '锁定'}
+                  >
+                    {isLocked ? '🔒' : '🔓'}
+                  </button>
                 </div>
-                {isActive && activeLayer && (
+                {isActive && layer && (
                   <div className="layer-properties">
                     <div className="layer-property">
                       <span>不透明度:</span>
                       <div className="layer-property-control">
                         <Slider
-                          value={100}
+                          value={Math.round(layer.opacity * 100)}
                           min={0}
                           max={100}
-                          onChange={() => {}}
+                          disabled={isLocked}
+                          onChange={(v) => {
+                            if (!isLocked) {
+                              onLayerOpacityChange?.(l.id, v / 100)
+                            }
+                          }}
                         />
-                        <span className="layer-property-value">100%</span>
+                        <span className="layer-property-value">{Math.round(layer.opacity * 100)}%</span>
                       </div>
                     </div>
                     <div className="layer-property">
                       <span>混合模式:</span>
-                      <select className="layer-blend-mode" defaultValue="normal">
-                        <option value="normal">Normal</option>
-                        <option value="multiply">Multiply</option>
-                        <option value="screen">Screen</option>
-                        <option value="overlay">Overlay</option>
+                      <select 
+                        className="layer-blend-mode" 
+                        value={layer.blendMode || 'source-over'}
+                        disabled={isLocked}
+                        onChange={(e) => {
+                          if (!isLocked) {
+                            onLayerBlendModeChange?.(l.id, e.target.value as GlobalCompositeOperation)
+                          }
+                        }}
+                      >
+                        <option value="source-over">正常</option>
+                        <option value="multiply">正片叠底</option>
+                        <option value="screen">滤色</option>
+                        <option value="overlay">叠加</option>
+                        <option value="soft-light">柔光</option>
+                        <option value="hard-light">强光</option>
+                        <option value="color-dodge">颜色减淡</option>
+                        <option value="color-burn">颜色加深</option>
+                        <option value="darken">变暗</option>
+                        <option value="lighten">变亮</option>
+                        <option value="difference">差值</option>
+                        <option value="exclusion">排除</option>
                       </select>
                     </div>
                   </div>
                 )}
                 <div className="layer-actions">
-                  <button className="layer-action-button" onClick={(e) => {
+                  <button
+                    className="layer-action-button" 
+                    disabled={isLocked}
+                    onClick={(e) => {
                       e.stopPropagation()
+                      if (!isLocked) {
                       onLayerDuplicate?.(l.id)
-                  }} title="复制">📋</button>
-                  <button className="layer-action-button" onClick={(e) => {
+                      }
+                    }}
+                    title={isLocked ? "锁定图层无法复制" : "复制"}
+                  >
+                    📋
+                  </button>
+                  <button
+                    className="layer-action-button" 
+                    disabled={isLocked}
+                    onClick={(e) => {
                       e.stopPropagation()
+                      if (!isLocked) {
                         onLayerDelete?.(l.id)
-                  }} title="删除">🗑</button>
+                      }
+                    }}
+                    title={isLocked ? "锁定图层无法删除" : "删除"}
+                  >
+                    🗑
+                  </button>
                 </div>
               </div>
             )
@@ -438,8 +600,8 @@ export function PropertyPanel({
             >
               <div className="history-text">{item.text}</div>
               <div className="history-time">{new Date(item.ts).toLocaleTimeString()}</div>
-            </div>
-          ))}
+              </div>
+            ))}
         </div>
       </div>
     )
@@ -447,106 +609,8 @@ export function PropertyPanel({
 
   // 根据工具类型渲染不同的内容
   const renderToolContent = () => {
-    // 选择工具（null）时显示标签页内容
-    if (activeTool === null) {
-      return (
-        <>
-          {/* 标签页 */}
-          <div className="property-tabs">
-            <button
-              className={`property-tab ${activeTab === 'adjust' ? 'active' : ''}`}
-              onClick={() => setActiveTab('adjust')}
-            >
-              调整
-            </button>
-            <button
-              className={`property-tab ${activeTab === 'filter' ? 'active' : ''}`}
-              onClick={() => setActiveTab('filter')}
-            >
-              滤镜
-            </button>
-            <button
-              className={`property-tab ${activeTab === 'layers' ? 'active' : ''}`}
-              onClick={() => setActiveTab('layers')}
-            >
-              图层
-            </button>
-            <button
-              className={`property-tab ${activeTab === 'history' ? 'active' : ''}`}
-              onClick={() => setActiveTab('history')}
-            >
-              历史
-            </button>
-          </div>
-
-          {/* 面板内容 */}
-          <div className="property-panel-body">
-            {activeTab === 'adjust' && renderAdjustPanel()}
-            {activeTab === 'filter' && renderFilterPanel()}
-            {activeTab === 'layers' && renderLayersPanel()}
-            {activeTab === 'history' && renderHistoryPanel()}
-          </div>
-        </>
-      )
-    }
-
-    // 裁剪工具
-    if (activeTool === 'crop') {
-      const renderer = rendererRef?.current?.getRenderer?.() || null
-      const crop = rendererRef?.current?.getCrop?.() || null
-      const imgSize = renderer?.state.imgSize || { w: 0, h: 0 }
-      const imageSize = { width: imgSize.w, height: imgSize.h }
-      
-      return (
-        <div className="property-panel-body">
-          <div className="property-panel-content">
-            <CropTool
-              onConfirm={onCropConfirm}
-              onCancel={() => onSelectTool(null)}
-              crop={crop}
-              onCropChange={(newCrop) => {
-                rendererRef?.current?.setCrop?.(newCrop)
-              }}
-              imageSize={imageSize}
-            />
-          </div>
-        </div>
-      )
-    }
-
-    // 画笔工具
-    if (activeTool === 'draw') {
-      return (
-        <div className="property-panel-body">
-          <div className="property-panel-content">
-            <DrawTool
-              onDrawStart={onDrawConfig}
-              onDrawEnd={() => {}}
-            />
-                </div>
-              </div>
-      )
-    }
-
-    // 文字工具
-    if (activeTool === 'text') {
-      return (
-        <div className="property-panel-body">
-          <div className="property-panel-content">
-            <TextTool
-              onAddText={onAddText}
-              onChange={activeTextMetadata && activeLayerId ? (config) => {
-                onUpdateTextLayer?.(activeLayerId, config)
-              } : undefined}
-              initialConfig={activeTextMetadata || undefined}
-              isEditMode={!!activeTextMetadata}
-            />
-          </div>
-        </div>
-      )
-    }
-
-    // 滤镜工具 - 直接显示滤镜面板
+    // 裁剪、画笔、文字工具或未选择工具时，都显示标签页
+    // 滤镜工具直接显示滤镜面板（不显示标签页）
     if (activeTool === 'filter') {
       return (
         <div className="property-panel-body">
@@ -555,7 +619,46 @@ export function PropertyPanel({
       )
     }
 
-    return null
+    // 其他情况显示标签页
+    return (
+      <>
+        {/* 标签页 */}
+        <div className="property-tabs">
+          <button
+            className={`property-tab ${activeTab === 'adjust' ? 'active' : ''}`}
+            onClick={() => setActiveTab('adjust')}
+          >
+            调整
+          </button>
+          <button
+            className={`property-tab ${activeTab === 'filter' ? 'active' : ''}`}
+            onClick={() => setActiveTab('filter')}
+          >
+            滤镜
+          </button>
+          <button
+            className={`property-tab ${activeTab === 'layers' ? 'active' : ''}`}
+            onClick={() => setActiveTab('layers')}
+          >
+            图层
+          </button>
+          <button
+            className={`property-tab ${activeTab === 'history' ? 'active' : ''}`}
+            onClick={() => setActiveTab('history')}
+          >
+            历史
+          </button>
+        </div>
+
+        {/* 面板内容 */}
+        <div className="property-panel-body">
+          {activeTab === 'adjust' && renderAdjustPanel()}
+          {activeTab === 'filter' && renderFilterPanel()}
+          {activeTab === 'layers' && renderLayersPanel()}
+          {activeTab === 'history' && renderHistoryPanel()}
+        </div>
+      </>
+    )
   }
 
   return (

@@ -480,14 +480,24 @@
   margin-bottom: 8px;
 }
 
-.layer-icon {
+.layer-visibility-button {
   width: 24px;
   height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
   color: #94a3b8;
+  transition: all 0.2s;
+  
+  &:hover {
+    color: #3b82f6;
+    transform: scale(1.1);
+  }
 }
 
 .layer-info {
@@ -510,9 +520,44 @@
   margin-top: 2px;
 }
 
-.layer-lock {
-  font-size: 14px;
-  color: #fbbf24;
+.layer-lock-button {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: #94a3b8;
+  transition: all 0.2s;
+  
+  &:hover {
+    color: #3b82f6;
+    transform: scale(1.1);
+  }
+  
+  &.locked {
+    color: #fbbf24;
+  }
+}
+
+.layer-item.locked {
+  opacity: 0.7;
+  
+  // 锁定状态下，图层名称区域显示为禁用状态，但按钮仍可点击
+  .layer-info {
+    opacity: 0.6;
+  }
+  
+  // 锁定按钮和可见性按钮始终可点击
+  .layer-lock-button,
+  .layer-visibility-button {
+    pointer-events: auto;
+    cursor: pointer;
+  }
 }
 
 .layer-properties {
@@ -554,8 +599,14 @@
   font-size: 14px;
   cursor: pointer;
   
-  &:hover {
+  &:hover:not(:disabled) {
     border-color: #3b82f6;
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #1a1f2e;
   }
 }
 
@@ -577,9 +628,19 @@
   font-size: 14px;
   transition: all 0.2s;
   
-  &:hover {
+  &:hover:not(:disabled) {
     background: #374151;
     border-color: #3b82f6;
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    
+    &:hover {
+      background: transparent;
+      border-color: #374151;
+    }
   }
 }
 

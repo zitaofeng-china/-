@@ -2,13 +2,7 @@
  * 图像压缩服务
  * 提供图像压缩功能，用于优化文件大小
  */
-
-export type CompressOptions = {
-  maxWidth?: number
-  maxHeight?: number
-  quality?: number
-  format?: 'image/jpeg' | 'image/png' | 'image/webp'
-}
+import type { CompressOptions } from '../types/service'
 
 /**
  * 压缩图像文件
