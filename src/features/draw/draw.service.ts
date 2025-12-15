@@ -2,17 +2,11 @@
  * 绘图服务
  * 提供绘制笔画和图形的核心逻辑
  */
-import type { Renderer } from '../../canvas/engine'
+import type { Renderer } from '../../types'
+import type { DrawPoint, DrawStroke } from '../../types/tool'
 
-// ==================== 类型定义 ====================
-
-export type Point = { x: number; y: number }
-
-export type DrawStroke = {
-  points: Point[]
-  color: string
-  size: number
-}
+// 为了向后兼容，导出 Point 作为 DrawPoint 的别名
+export type Point = DrawPoint
 
 // ==================== 函数实现 ====================
 
@@ -42,7 +36,7 @@ export async function drawStroke(
   }
 
   // 将世界坐标（图像坐标）转换为图层本地坐标，考虑位移/缩放/旋转
-  const toLocal = (pt: Point) => {
+  const toLocal = (pt: DrawPoint) => {
     const { offset, scale, rotation, bitmap } = targetLayer
     const centerX = offset.x + bitmap.width / 2
     const centerY = offset.y + bitmap.height / 2

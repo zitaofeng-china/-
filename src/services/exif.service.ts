@@ -2,18 +2,7 @@
  * EXIF信息服务
  * 读取和处理图像文件的EXIF元数据信息
  */
-
-// ==================== 类型定义 ====================
-
-export type ExifData = {
-  orientation?: number
-  width?: number
-  height?: number
-  make?: string
-  model?: string
-  dateTime?: string
-  [key: string]: unknown
-}
+import type { ExifData } from '../types/service'
 
 // ==================== 函数实现 ====================
 

@@ -2,8 +2,10 @@
  * 图像加载器
  * 处理图像文件的加载，包括EXIF信息读取和图像预处理
  */
-import { readExif, type ExifData } from '../../services/exif.service'
+import { readExif } from '../../services/exif.service'
+import type { ExifData } from '../../types/service'
 
+// 重新导出 LoadedImage 类型以便使用
 export type LoadedImage = {
   bitmap: ImageBitmap
   exif: ExifData

@@ -6,14 +6,21 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Toast } from '../../components/Toast'
-import { createRenderer, type Renderer } from '../../canvas/engine'
-import { drawStroke, createStroke, type Point as DrawPoint } from '../../features/draw/draw.service'
-import { addTextLayer, getDefaultTextConfig, type TextLayer } from '../../features/text/text.service'
+import { createRenderer } from '../../canvas/engine'
+import { drawStroke, createStroke } from '../../features/draw/draw.service'
+import { addTextLayer, getDefaultTextConfig } from '../../features/text/text.service'
 import { useCanvasResize } from '../../hooks/useCanvasResize'
 import { useDrag } from '../../hooks/useDrag'
 import { useKeyPress } from '../../hooks/useKeyPress'
 import { exportImage } from '../../services/file.service'
 import { debounce } from '../../utils/debounce'
+import { mapRendererLayersToUI } from '../../utils/layer-utils'
+import type {
+  Renderer,
+  EditorTool
+} from '../../types'
+import type { UILayer } from '../../types/layer'
+import type { TextLayer, DrawPoint } from '../../types/tool'
 
 // ==================== 类型定义 ====================
 
@@ -27,16 +34,18 @@ type Props = {
   drawEnabled?: boolean
   textEnabled?: boolean
   filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
-  onFilterChange: (next: { brightness: number; contrast: number; saturation: number }) => void
+  onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
   onFileNameChange: (name: string | null) => void
   onTimeline: (text: string) => void
-  onLayersChange?: (layers: { id: string; name: string; w: number; h: number }[]) => void
+  onLayersChange?: (layers: UILayer[]) => void
+  onCropChange?: (crop: CropState | null) => void
   activeLayerId?: string | null
   onActiveLayerChange?: (id: string | null) => void
   onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
   textLayerMetadata?: { [layerId: string]: Omit<TextLayer, 'id' | 'x' | 'y'> }
-  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<void>
-  onSelectTool?: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
+  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<string | void>
+  onTextLayerIdUpdate?: (oldLayerId: string, newLayerId: string) => void
+  onSelectTool?: (tool: EditorTool) => void
   onUndo?: () => void
   onRedo?: () => void
   canUndo?: boolean
@@ -52,6 +61,10 @@ const CanvasStage = React.forwardRef<
     handleLayerVisibilityToggle?: (id: string, visible: boolean) => void
     handleLayerMove?: (id: string, direction: 'up' | 'down') => void
     handleLayerDuplicate?: (id: string) => void
+    handleLayerOpacityChange?: (id: string, opacity: number) => void
+    handleLayerBlendModeChange?: (id: string, blendMode: GlobalCompositeOperation) => void
+    handleLayerLockedChange?: (id: string, locked: boolean) => void
+    handleAddLayer?: () => void
     onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
   },
   Props
@@ -64,11 +77,13 @@ const CanvasStage = React.forwardRef<
   onFileNameChange,
   onTimeline,
   onLayersChange,
+  onCropChange,
   activeLayerId,
   onActiveLayerChange,
   onTextLayerCreated,
   textLayerMetadata = {},
   onUpdateTextLayer,
+  onTextLayerIdUpdate,
   onSelectTool,
   onUndo,
   onRedo,
@@ -84,7 +99,13 @@ const CanvasStage = React.forwardRef<
   const [fileName, setFileName] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [crop, setCrop] = useState<CropState | null>(null)
-  const [layers, setLayers] = useState<{ id: string; name: string; w: number; h: number }[]>([])
+  const updateCrop = useCallback(
+    (next: CropState | null) => {
+      setCrop(next)
+      onCropChange?.(next)
+    },
+    [onCropChange]
+  )
   const [drawColor, setDrawColor] = useState('#000000')
   const [drawSize, setDrawSize] = useState(5)
   const [isDrawing, setIsDrawing] = useState(false)
@@ -102,11 +123,28 @@ const CanvasStage = React.forwardRef<
   const lastClickLayerId = useRef<string | null>(null)
   const isUpdatingTextLayerRef = useRef<boolean>(false) // 标记是否正在更新文本图层
   
+  // 统一延迟时间常量
+  const TEXT_UPDATE_DELAY = 2000 // 文本图层更新完成后的延迟时间（ms）
+  const DOUBLE_CLICK_DELAY = 300 // 双击检测延迟时间（ms）
+  
   // 创建防抖的文本更新函数
   const debouncedTextUpdate = useRef(
     debounce(async (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => {
       if (onUpdateTextLayer) {
-        await onUpdateTextLayer(layerId, config)
+        const newLayerId = await onUpdateTextLayer(layerId, config)
+        // 如果返回了新图层ID，更新编辑状态
+        if (newLayerId && newLayerId !== layerId) {
+          // 标记正在更新，避免触发退出编辑模式的逻辑
+          if (!isUpdatingTextLayerRef.current) {
+            isUpdatingTextLayerRef.current = true
+            setTimeout(() => {
+              isUpdatingTextLayerRef.current = false
+            }, TEXT_UPDATE_DELAY)
+          }
+          setEditingTextLayerId(newLayerId)
+          // 通知父组件图层ID已更新
+          onTextLayerIdUpdate?.(layerId, newLayerId)
+        }
       }
     }, 500)
   ).current
@@ -248,7 +286,8 @@ const CanvasStage = React.forwardRef<
       ]
 
       ctx.save()
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.55)'
+      // 增强背景遮罩的不透明度
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.7)'
       ctx.beginPath()
       ctx.rect(0, 0, t.vw, t.vh)
       ctx.moveTo(points[0].x, points[0].y)
@@ -259,9 +298,34 @@ const CanvasStage = React.forwardRef<
       ctx.closePath()
       ctx.fill('evenodd')
 
-      ctx.strokeStyle = '#38bdf8'
+      // 绘制外发光效果（外层边框）
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)'
+      ctx.lineWidth = 4
+      ctx.setLineDash([])
+      ctx.beginPath()
+      points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.closePath()
+      ctx.stroke()
+
+      // 绘制主边框（更粗更明显）
+      ctx.strokeStyle = '#3b82f6'
+      ctx.lineWidth = 3
+      ctx.setLineDash([8, 4])
+      ctx.beginPath()
+      points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y)
+        else ctx.lineTo(p.x, p.y)
+      })
+      ctx.closePath()
+      ctx.stroke()
+      
+      // 绘制内层高光边框
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)'
       ctx.lineWidth = 1.5
-      ctx.setLineDash([6, 6])
+      ctx.setLineDash([8, 4])
       ctx.beginPath()
       points.forEach((p, i) => {
         if (i === 0) ctx.moveTo(p.x, p.y)
@@ -271,33 +335,149 @@ const CanvasStage = React.forwardRef<
       ctx.stroke()
       ctx.setLineDash([])
 
-      const drawHandle = (p?: Point | null, size = 9) => {
+      // 绘制九宫格辅助线（非常明显）
+      {
+        // 计算九宫格线的位置（1/3 和 2/3 位置）
+        const thirdW = crop.w / 3
+        const thirdH = crop.h / 3
+        
+        // 两条垂直线（将宽度分成三等份）
+        const verticalLine1 = toView({ x: -halfW + thirdW, y: -halfH })
+        const verticalLine1End = toView({ x: -halfW + thirdW, y: halfH })
+        const verticalLine2 = toView({ x: -halfW + thirdW * 2, y: -halfH })
+        const verticalLine2End = toView({ x: -halfW + thirdW * 2, y: halfH })
+        
+        // 两条水平线（将高度分成三等份）
+        const horizontalLine1 = toView({ x: -halfW, y: -halfH + thirdH })
+        const horizontalLine1End = toView({ x: halfW, y: -halfH + thirdH })
+        const horizontalLine2 = toView({ x: -halfW, y: -halfH + thirdH * 2 })
+        const horizontalLine2End = toView({ x: halfW, y: -halfH + thirdH * 2 })
+        
+        // 绘制外发光效果（蓝色半透明）
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.4)'
+        ctx.lineWidth = 4
+        ctx.setLineDash([8, 4])
+        
+        // 绘制垂直线外发光
+        if (verticalLine1 && verticalLine1End) {
+          ctx.beginPath()
+          ctx.moveTo(verticalLine1.x, verticalLine1.y)
+          ctx.lineTo(verticalLine1End.x, verticalLine1End.y)
+          ctx.stroke()
+        }
+        if (verticalLine2 && verticalLine2End) {
+          ctx.beginPath()
+          ctx.moveTo(verticalLine2.x, verticalLine2.y)
+          ctx.lineTo(verticalLine2End.x, verticalLine2End.y)
+          ctx.stroke()
+        }
+        
+        // 绘制水平线外发光
+        if (horizontalLine1 && horizontalLine1End) {
+          ctx.beginPath()
+          ctx.moveTo(horizontalLine1.x, horizontalLine1.y)
+          ctx.lineTo(horizontalLine1End.x, horizontalLine1End.y)
+          ctx.stroke()
+        }
+        if (horizontalLine2 && horizontalLine2End) {
+          ctx.beginPath()
+          ctx.moveTo(horizontalLine2.x, horizontalLine2.y)
+          ctx.lineTo(horizontalLine2End.x, horizontalLine2End.y)
+          ctx.stroke()
+        }
+        
+        // 绘制主线条（白色高亮）
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+        ctx.lineWidth = 2
+        ctx.setLineDash([8, 4])
+        
+        // 绘制垂直线主线条
+        if (verticalLine1 && verticalLine1End) {
+          ctx.beginPath()
+          ctx.moveTo(verticalLine1.x, verticalLine1.y)
+          ctx.lineTo(verticalLine1End.x, verticalLine1End.y)
+          ctx.stroke()
+        }
+        if (verticalLine2 && verticalLine2End) {
+          ctx.beginPath()
+          ctx.moveTo(verticalLine2.x, verticalLine2.y)
+          ctx.lineTo(verticalLine2End.x, verticalLine2End.y)
+          ctx.stroke()
+        }
+        
+        // 绘制水平线主线条
+        if (horizontalLine1 && horizontalLine1End) {
+          ctx.beginPath()
+          ctx.moveTo(horizontalLine1.x, horizontalLine1.y)
+          ctx.lineTo(horizontalLine1End.x, horizontalLine1End.y)
+          ctx.stroke()
+        }
+        if (horizontalLine2 && horizontalLine2End) {
+          ctx.beginPath()
+          ctx.moveTo(horizontalLine2.x, horizontalLine2.y)
+          ctx.lineTo(horizontalLine2End.x, horizontalLine2End.y)
+          ctx.stroke()
+        }
+        
+        ctx.setLineDash([])
+      }
+
+      const drawHandle = (p?: Point | null, size = 12) => {
         if (!p) return
         const half = size / 2
+        // 绘制外发光
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'
+        ctx.beginPath()
+        ctx.rect(p.x - half - 2, p.y - half - 2, size + 4, size + 4)
+        ctx.fill()
+        // 绘制主控制点
         ctx.fillStyle = '#fff'
-        ctx.strokeStyle = '#0f172a'
-        ctx.lineWidth = 1
+        ctx.strokeStyle = '#3b82f6'
+        ctx.lineWidth = 2
         ctx.beginPath()
         ctx.rect(p.x - half, p.y - half, size, size)
         ctx.fill()
         ctx.stroke()
+        // 绘制内层高光
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.rect(p.x - half + 1, p.y - half + 1, size - 2, size - 2)
+        ctx.stroke()
       }
-      points.forEach((p) => drawHandle(p))
-      midPoints.forEach((p) => drawHandle(p, 7))
+      points.forEach((p) => drawHandle(p, 12))
+      midPoints.forEach((p) => drawHandle(p, 10))
 
       if (rotateHandleView) {
+        // 绘制旋转控制线（更明显）
         ctx.beginPath()
         ctx.moveTo(midPoints[0]!.x, midPoints[0]!.y)
         ctx.lineTo(rotateHandleView.x, rotateHandleView.y)
-        ctx.strokeStyle = '#38bdf8'
-        ctx.lineWidth = 1
+        ctx.strokeStyle = '#3b82f6'
+        ctx.lineWidth = 2
+        ctx.setLineDash([4, 4])
         ctx.stroke()
+        ctx.setLineDash([])
 
+        // 绘制旋转控制点（更大更明显）
+        // 外发光
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'
         ctx.beginPath()
-        ctx.arc(rotateHandleView.x, rotateHandleView.y, 7, 0, Math.PI * 2)
+        ctx.arc(rotateHandleView.x, rotateHandleView.y, 10, 0, Math.PI * 2)
+        ctx.fill()
+        // 主控制点
+        ctx.beginPath()
+        ctx.arc(rotateHandleView.x, rotateHandleView.y, 8, 0, Math.PI * 2)
         ctx.fillStyle = '#fff'
         ctx.fill()
-        ctx.strokeStyle = '#0f172a'
+        ctx.strokeStyle = '#3b82f6'
+        ctx.lineWidth = 2
+        ctx.stroke()
+        // 内层高光
+        ctx.beginPath()
+        ctx.arc(rotateHandleView.x, rotateHandleView.y, 6, 0, Math.PI * 2)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'
+        ctx.lineWidth = 1
         ctx.stroke()
       }
 
@@ -307,17 +487,19 @@ const CanvasStage = React.forwardRef<
     renderer.render()
   }, [crop, cropEnabled, activeLayerId, imageToView, getTransforms])
 
+  // 检查图层是否锁定
+  const checkLayerLocked = useCallback((id: string): boolean => {
+    const renderer = rendererRef.current
+    if (!renderer) return true
+    const layer = renderer.getLayer(id)
+    return layer?.locked === true
+  }, [])
+
   const syncLayers = useCallback(() => {
     const renderer = rendererRef.current
     if (!renderer) return
-    const sizes = renderer.state.layers.map((l) => ({
-      id: l.id,
-      name: l.name,
-      w: l.bitmap.width,
-      h: l.bitmap.height,
-      visible: l.visible
-    }))
-    setLayers(sizes)
+    const sizes = mapRendererLayersToUI(renderer.state.layers)
+    // 直接同步到父组件，不再维护内部状态
     onLayersChange?.(sizes)
   }, [onLayersChange])
 
@@ -338,16 +520,18 @@ const CanvasStage = React.forwardRef<
     const boxW = w * 0.6
     const boxH = h * 0.6
     if (cropEnabled) {
-      setCrop({ x: (w - boxW) / 2, y: (h - boxH) / 2, w: boxW, h: boxH, rotation: 0 })
+      updateCrop({ x: (w - boxW) / 2, y: (h - boxH) / 2, w: boxW, h: boxH, rotation: 0 })
     } else {
-      setCrop(null)
+      updateCrop(null)
       renderer.setOverlay(null)
       renderer.render()
     }
   }
 
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
+    if (e.cancelable) {
+      e.preventDefault()
+    }
     const renderer = rendererRef.current
     if (!renderer) return
     const rect = containerRef.current?.getBoundingClientRect()
@@ -406,96 +590,6 @@ const CanvasStage = React.forwardRef<
     
     return null
   }, [viewToImage])
-
-  // 处理双击事件，进入文本编辑模式
-  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
-    if (!rendererRef.current || rendererRef.current.state.layers.length === 0) {
-      return
-    }
-    
-    if (cropEnabled || drawEnabled) {
-      return
-    }
-    
-    const rect = containerRef.current?.getBoundingClientRect()
-    if (!rect) {
-      return
-    }
-    const viewPt = { x: e.clientX - rect.left, y: e.clientY - rect.top }
-    
-    // 检测双击是否在图层上
-    const hitLayerId = hitTestLayer(viewPt)
-    
-    if (!hitLayerId) {
-      return
-    }
-    
-    const renderer = rendererRef.current
-    const layer = renderer.getLayer(hitLayerId)
-    const isTextLayer = layer && layer.name.startsWith('Text:')
-    
-    // 如果是文本图层，查找元数据
-    if (isTextLayer) {
-      // 查找元数据：先通过图层ID，如果找不到则通过图层名称匹配
-      let metadata = textLayerMetadata[hitLayerId]
-      if (!metadata) {
-        // 通过图层名称查找元数据（图层名称格式：Text: 文本内容）
-        const layerName = layer?.name || ''
-        const textContent = layerName.replace('Text: ', '')
-        // 遍历所有元数据，找到匹配的
-        for (const [, metaData] of Object.entries(textLayerMetadata)) {
-          if (metaData.text === textContent) {
-            metadata = metaData
-            break
-          }
-        }
-      }
-      
-      if (metadata) {
-        e.preventDefault()
-        e.stopPropagation()
-        
-        // 清除拖拽定时器，防止拖拽开始
-        if (dragTimeoutRef.current) {
-          clearTimeout(dragTimeoutRef.current)
-          dragTimeoutRef.current = null
-        }
-        
-        setEditingTextValue(metadata.text)
-        setEditingTextLayerId(hitLayerId)
-        
-        // 计算输入框位置
-        const t = getTransforms()
-        if (t && layer) {
-          const { x, y } = layer.offset
-          const { width: w, height: h } = layer.bitmap
-          const scaledW = w * layer.scale * t.zoom
-          const scaledH = h * layer.scale * t.zoom
-          const centerView = imageToView({ x: x + w / 2, y: y + h / 2 })
-          if (centerView) {
-            setEditingTextPosition({
-              x: centerView.x - scaledW / 2,
-              y: centerView.y - scaledH / 2,
-              width: scaledW,
-              height: scaledH
-            })
-          }
-        }
-        
-        // 延迟聚焦，确保DOM已更新
-        setTimeout(() => {
-          if (textInputRef.current) {
-            textInputRef.current.focus()
-            textInputRef.current.select()
-          }
-        }, 100)
-      } else {
-        // 未找到元数据则忽略
-      }
-    } else {
-      // 非文本图层不处理
-    }
-  }, [cropEnabled, drawEnabled, textLayerMetadata, hitTestLayer, imageToView, getTransforms])
 
   const handleMouseDown = (e: React.MouseEvent) => {
     // 如果正在编辑文本，检查点击是否在输入框上
@@ -622,36 +716,17 @@ const CanvasStage = React.forwardRef<
         }
       }
       
-      // 更新点击记录（仅在非双击时）
+      // 立即记录点击并处理拖拽（文本图层不再等待双击）
       lastClickTime.current = now
       lastClickLayerId.current = hitLayerId
       
-      // 如果是文本图层，延迟开始拖拽，等待可能的双击
-      if (hitLayerId === activeLayerId && !cropEnabled && isTextLayer) {
-        // 清除之前的拖拽定时器
-        if (dragTimeoutRef.current) {
-          clearTimeout(dragTimeoutRef.current)
-        }
-        
-        // 延迟开始拖拽，给双击事件时间（300ms，与双击检测时间一致）
-        dragTimeoutRef.current = setTimeout(() => {
-          // 如果300ms后还没有进入编辑模式，则开始拖拽
-          if (!editingTextLayerId && !isMovingLayer) {
-            setIsMovingLayer(true)
-            setMovingLayerId(activeLayerId)
-            const imgPt = viewToImage(viewPt)
-            if (imgPt) {
-              setLayerMoveStart(imgPt)
-            }
-          }
-          dragTimeoutRef.current = null
-        }, 300)
-        
-        return
-      }
-      
-      // 如果点击的是已选中的图层（非文本图层），开始拖拽移动
+      // 如果点击的是已选中的图层，开始拖拽移动
       if (hitLayerId === activeLayerId && !cropEnabled) {
+        // 检查图层是否被锁定
+        if (checkLayerLocked(hitLayerId)) {
+          // 锁定图层不能移动
+          return
+        }
         e.preventDefault()
         e.stopPropagation()
         setIsMovingLayer(true)
@@ -776,12 +851,16 @@ const CanvasStage = React.forwardRef<
 
   const handleCropConfirm = useCallback(async () => {
     const renderer = rendererRef.current
-    if (!renderer || !crop || !activeLayerId) return
-    await renderer.applyCrop(crop, activeLayerId)
+    if (!renderer || !crop) return
+    const targetLayerId =
+      activeLayerId || renderer.state.layers[renderer.state.layers.length - 1]?.id
+    if (!targetLayerId) return
+
+    await renderer.applyCrop(crop, targetLayerId)
     const { w, h } = renderer.state.imgSize
     const boxW = w * 0.8
     const boxH = h * 0.8
-    setCrop({ x: (w - boxW) / 2, y: (h - boxH) / 2, w: boxW, h: boxH, rotation: 0 })
+    updateCrop({ x: (w - boxW) / 2, y: (h - boxH) / 2, w: boxW, h: boxH, rotation: 0 })
     renderer.fitToView()
     syncZoom()
     onTimeline('裁剪完成')
@@ -840,6 +919,7 @@ const CanvasStage = React.forwardRef<
           }
         }
         
+        // addTextLayer 需要 Omit<TextLayer, 'id'>，所以不需要传递 id
         const layerId = await addTextLayer(renderer, {
           ...config,
           x: textX,
@@ -877,9 +957,18 @@ const CanvasStage = React.forwardRef<
     (id: string) => {
       const renderer = rendererRef.current
       if (!renderer) return
+      if (checkLayerLocked(id)) return // 锁定图层不能删除
       const layerName = renderer.state.layers.find((l) => l.id === id)?.name || id
       renderer.deleteLayer(id)
       syncLayers()
+      
+      // 如果删除的是正在编辑的文本图层，清理编辑状态
+      if (id === editingTextLayerId) {
+        setEditingTextLayerId(null)
+        setEditingTextPosition(null)
+        setEditingTextValue('')
+      }
+      
       // 如果删除的是当前激活的图层，切换到其他图层
       if (id === activeLayerId) {
         const remainingLayers = renderer.state.layers
@@ -887,7 +976,7 @@ const CanvasStage = React.forwardRef<
       }
       onTimeline(`删除图层：${layerName}`)
     },
-    [syncLayers, onTimeline, activeLayerId, onActiveLayerChange]
+    [syncLayers, onTimeline, activeLayerId, onActiveLayerChange, checkLayerLocked, editingTextLayerId]
   )
 
   // 快捷键：Delete 删除选中图层（编辑文本时不触发）
@@ -924,16 +1013,18 @@ const CanvasStage = React.forwardRef<
     (id: string) => {
       const renderer = rendererRef.current
       if (!renderer) return
+      if (checkLayerLocked(id)) return // 锁定图层不能复制
       renderer.duplicateLayer(id)
       syncLayers()
       onTimeline('复制图层')
     },
-    [syncLayers, onTimeline]
+    [syncLayers, onTimeline, checkLayerLocked]
   )
 
   const handleLayerScaleChange = useCallback((id: string, scale: number) => {
     const renderer = rendererRef.current
     if (!renderer) return
+    if (checkLayerLocked(id)) return // 锁定图层不能缩放
     renderer.setLayerScale(id, scale)
     syncLayers()
     // 不在拖动过程中记录，只在拖动结束时记录
@@ -946,19 +1037,67 @@ const CanvasStage = React.forwardRef<
   const handleLayerRotationChange = useCallback((id: string, rotation: number) => {
     const renderer = rendererRef.current
     if (!renderer) return
+    if (checkLayerLocked(id)) return // 锁定图层不能旋转
     renderer.setLayerRotation(id, rotation)
     syncLayers()
     // 不在拖动过程中记录，只在拖动结束时记录
-  }, [syncLayers])
+  }, [syncLayers, checkLayerLocked])
 
   const handleLayerRotationChangeEnd = useCallback((id: string, rotation: number) => {
     onTimeline(`调整图层旋转: ${Math.round(rotation)}°`)
   }, [onTimeline])
 
-  const applyCrop = useCallback((next: CropState) => {
-    setCrop(next)
-    rendererRef.current?.render()
-  }, [])
+  const handleLayerOpacityChange = useCallback((id: string, opacity: number) => {
+    const renderer = rendererRef.current
+    if (!renderer) return
+    if (checkLayerLocked(id)) return // 锁定图层不能调整不透明度
+    renderer.setLayerOpacity(id, opacity)
+    syncLayers()
+    onTimeline(`调整图层不透明度: ${Math.round(opacity * 100)}%`)
+  }, [syncLayers, onTimeline, checkLayerLocked])
+
+  const handleLayerBlendModeChange = useCallback((id: string, blendMode: GlobalCompositeOperation) => {
+    const renderer = rendererRef.current
+    if (!renderer) return
+    if (checkLayerLocked(id)) return // 锁定图层不能调整混合模式
+    renderer.setLayerBlendMode(id, blendMode)
+    syncLayers()
+    onTimeline(`调整图层混合模式: ${blendMode}`)
+  }, [syncLayers, onTimeline, checkLayerLocked])
+
+  const handleLayerLockedChange = useCallback((id: string, locked: boolean) => {
+    const renderer = rendererRef.current
+    if (!renderer) return
+    renderer.setLayerLocked(id, locked)
+    syncLayers()
+    onTimeline(locked ? '锁定图层' : '解锁图层')
+  }, [syncLayers, onTimeline])
+
+  const handleAddLayer = useCallback(async () => {
+    const renderer = rendererRef.current
+    if (!renderer) return
+    
+    // 创建空白图层，使用当前图像尺寸或默认尺寸
+    const { w, h } = renderer.state.imgSize
+    const width = w > 0 ? w : 800
+    const height = h > 0 ? h : 600
+    
+    try {
+      await renderer.addEmptyLayer(width, height)
+      syncLayers()
+      onTimeline('添加空白图层')
+    } catch (error) {
+      console.error('添加图层失败:', error)
+    }
+  }, [syncLayers, onTimeline])
+
+  const applyCrop = useCallback(
+    (next: CropState | null) => {
+      updateCrop(next)
+      rendererRef.current?.render()
+    },
+    [updateCrop]
+  )
 
   // 通过ref暴露方法给父组件
   React.useImperativeHandle(
@@ -974,6 +1113,10 @@ const CanvasStage = React.forwardRef<
       handleLayerVisibilityToggle: handleLayerVisibilityToggle,
       handleLayerMove: handleLayerMove,
       handleLayerDuplicate: handleLayerDuplicate,
+      handleLayerOpacityChange: handleLayerOpacityChange,
+      handleLayerBlendModeChange: handleLayerBlendModeChange,
+      handleLayerLockedChange: handleLayerLockedChange,
+      handleAddLayer: handleAddLayer,
       handleLayerScaleChange: handleLayerScaleChange,
       handleLayerScaleChangeEnd: handleLayerScaleChangeEnd,
       handleLayerRotationChange: handleLayerRotationChange,
@@ -982,7 +1125,7 @@ const CanvasStage = React.forwardRef<
       getCrop: () => crop,
       setCrop: applyCrop
     }),
-    [handleAddText, handleCropConfirm, handleLayerDelete, handleLayerVisibilityToggle, handleLayerMove, handleLayerDuplicate, handleLayerScaleChange, handleLayerScaleChangeEnd, handleLayerRotationChange, handleLayerRotationChangeEnd, crop, applyCrop]
+    [handleAddText, handleCropConfirm, handleLayerDelete, handleLayerVisibilityToggle, handleLayerMove, handleLayerDuplicate, handleLayerScaleChange, handleLayerScaleChangeEnd, handleLayerRotationChange, handleLayerRotationChangeEnd, handleLayerOpacityChange, handleLayerBlendModeChange, handleLayerLockedChange, handleAddLayer, crop, applyCrop]
   )
 
   const hitTest = (viewPt: Point): Hit | null => {
@@ -1170,7 +1313,7 @@ const CanvasStage = React.forwardRef<
     const renderer = rendererRef.current
     if (!renderer) return
     if (!cropEnabled) {
-      setCrop(null)
+      updateCrop(null)
       updateOverlay()
       return
     }
@@ -1178,15 +1321,10 @@ const CanvasStage = React.forwardRef<
       const { w, h } = renderer.state.imgSize
       const boxW = w * 0.6
       const boxH = h * 0.6
-      setCrop({ x: (w - boxW) / 2, y: (h - boxH) / 2, w: boxW, h: boxH, rotation: 0 })
+      updateCrop({ x: (w - boxW) / 2, y: (h - boxH) / 2, w: boxW, h: boxH, rotation: 0 })
     }
-  }, [cropEnabled, crop, updateOverlay])
+  }, [cropEnabled, crop, updateOverlay, updateCrop])
 
-  // 当activeLayerId变化时，更新overlay显示
-  useEffect(() => {
-    updateOverlay()
-  }, [activeLayerId, updateOverlay])
-  
   // 当编辑文本图层时，更新输入框位置（当缩放或平移时）
   // 同时检查图层ID是否变化（当文本更新时，图层会被重新创建，ID会变化）
   useEffect(() => {
@@ -1215,10 +1353,10 @@ const CanvasStage = React.forwardRef<
             // 如果已经设置了标记，不重复设置（避免重置时间冲突）
             if (!isUpdatingTextLayerRef.current) {
               isUpdatingTextLayerRef.current = true
-              // 延迟重置标记，确保更新完成（统一使用2000ms）
+              // 延迟重置标记，确保更新完成
               setTimeout(() => {
                 isUpdatingTextLayerRef.current = false
-              }, 2000)
+              }, TEXT_UPDATE_DELAY)
             }
             setEditingTextLayerId(matchingLayer.id)
           }

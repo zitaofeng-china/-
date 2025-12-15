@@ -2,17 +2,8 @@
  * 裁剪服务
  * 提供图像裁剪功能的核心逻辑
  */
-import type { Renderer } from '../../canvas/engine'
-
-// ==================== 类型定义 ====================
-
-export type CropRect = {
-  x: number
-  y: number
-  w: number
-  h: number
-  rotation: number
-}
+import type { Renderer } from '../../types'
+import type { CropRect } from '../../types/tool'
 
 // ==================== 函数实现 ====================
 

@@ -2,15 +2,8 @@
  * 滤镜服务
  * 提供图像滤镜效果应用的核心逻辑
  */
-import type { Renderer } from '../../canvas/engine'
-
-// ==================== 类型定义 ====================
-
-export type FilterState = {
-  brightness: number
-  contrast: number
-  saturation: number
-}
+import type { Renderer } from '../../types'
+import type { FilterState } from '../../types/tool'
 
 // ==================== 函数实现 ====================
 
@@ -31,7 +24,10 @@ export function getDefaultFilter(): FilterState {
   return {
     brightness: 100,
     contrast: 100,
-    saturation: 100
+    saturation: 100,
+    hue: 0,
+    blur: 0,
+    sharpen: 0
   }
 }
 
@@ -41,14 +37,20 @@ export function getDefaultFilter(): FilterState {
  * @returns 是否有效
  */
 export function validateFilter(filter: FilterState): boolean {
-  const { brightness, contrast, saturation } = filter
+  const { brightness, contrast, saturation, hue, blur, sharpen } = filter
   return (
     brightness >= 0 &&
     brightness <= 200 &&
     contrast >= 0 &&
     contrast <= 200 &&
     saturation >= 0 &&
-    saturation <= 200
+    saturation <= 200 &&
+    hue >= -180 &&
+    hue <= 180 &&
+    blur >= 0 &&
+    blur <= 100 &&
+    sharpen >= 0 &&
+    sharpen <= 100
   )
 }
 

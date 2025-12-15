@@ -27,6 +27,12 @@ export type Layer = {
   scale: number
   /** 图层旋转角度（度），默认0 */
   rotation: number
+  /** 图层不透明度，0-1，默认1 */
+  opacity: number
+  /** 图层混合模式，默认 'normal' */
+  blendMode: GlobalCompositeOperation
+  /** 图层是否锁定，默认 false */
+  locked: boolean
 }
 
 type CropRect = { x: number; y: number; w: number; h: number; rotation: number }
@@ -119,7 +125,10 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
       offset: layerOffset,
       visible: true,
       scale: 1,
-      rotation: 0
+      rotation: 0,
+      opacity: 1,
+      blendMode: 'source-over',
+      locked: false
     }
     state.layers.push(layer)
     recomputeSize()
@@ -287,6 +296,10 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
         // 为每个图层单独应用滤镜（确保滤镜正确应用）
         bgCtx.save()
         bgCtx.filter = filters.length > 0 ? filters.join(' ') : 'none'
+        // 应用图层不透明度
+        bgCtx.globalAlpha = layer.opacity
+        // 应用图层混合模式
+        bgCtx.globalCompositeOperation = layer.blendMode
         // 计算图层在图像坐标系中的位置（考虑offset）
         const layerX = layer.offset.x
         const layerY = layer.offset.y
@@ -389,6 +402,58 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
     render()
   }
 
+  function setLayerOpacity(id: string, opacity: number) {
+    const layer = state.layers.find((l) => l.id === id)
+    if (!layer) return
+    layer.opacity = clamp(opacity, 0, 1)
+    render()
+  }
+
+  function setLayerBlendMode(id: string, blendMode: GlobalCompositeOperation) {
+    const layer = state.layers.find((l) => l.id === id)
+    if (!layer) return
+    layer.blendMode = blendMode
+    render()
+  }
+
+  function setLayerLocked(id: string, locked: boolean) {
+    const layer = state.layers.find((l) => l.id === id)
+    if (!layer) return
+    layer.locked = locked
+    render()
+  }
+
+  async function addEmptyLayer(width: number, height: number, name?: string, offset?: Vec2) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    
+    // 创建透明画布
+    ctx.clearRect(0, 0, width, height)
+    
+    const bitmap = await createImageBitmap(canvas)
+    const layerOffset: Vec2 = offset || { x: 0, y: 0 }
+    
+    const layer: Layer = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: name || `图层 ${state.layers.length + 1}`,
+      bitmap,
+      offset: layerOffset,
+      visible: true,
+      scale: 1,
+      rotation: 0,
+      opacity: 1,
+      blendMode: 'source-over',
+      locked: false
+    }
+    state.layers.push(layer)
+    recomputeSize()
+    render()
+    return layer.id
+  }
+
   function getLayer(id: string) {
     return state.layers.find((l) => l.id === id)
   }
@@ -420,7 +485,10 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
         offset: { ...layer.offset },
         visible: layer.visible,
         scale: layer.scale,
-        rotation: layer.rotation
+        rotation: layer.rotation,
+        opacity: layer.opacity,
+        blendMode: layer.blendMode,
+        locked: false
       }
       state.layers.push(newLayer)
       recomputeSize()
@@ -461,6 +529,10 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
     setLayerOffset,
     setLayerScale,
     setLayerRotation,
+    setLayerOpacity,
+    setLayerBlendMode,
+    setLayerLocked,
+    addEmptyLayer,
     getLayer,
     deleteLayer,
     duplicateLayer,

@@ -3,10 +3,11 @@
  * 提供编辑器工具的选择和切换功能
  */
 import React from 'react'
+import type { EditorTool } from '../../types'
 
 type Props = {
-  activeTool: 'crop' | 'filter' | 'draw' | 'text' | null
-  onSelectTool: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
+  activeTool: EditorTool
+  onSelectTool: (tool: EditorTool) => void
   onUndo?: () => void
   onRedo?: () => void
   canUndo?: boolean

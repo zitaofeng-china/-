@@ -9,13 +9,18 @@ import { CanvasStage } from './CanvasStage'
 import { PropertyPanel } from './PropertyPanel'
 import { ToolSidebar } from './ToolSidebar'
 import './editor.scss'
-import type { Renderer } from '../../canvas/engine'
-import type { TextLayer } from '../../features/text/text.service'
-import type { CanvasStageRef, EditorSnapshot, TextLayerMetadata } from './index'
+import type {
+  EditorTool,
+  EditorSnapshot,
+  TextLayerMetadata,
+  CanvasStageRef
+} from '../../types'
+import type { UILayer } from '../../types/layer'
+import type { TextLayer } from '../../types/tool'
 
 type Props = {
-  activeTool: 'crop' | 'filter' | 'draw' | 'text' | null
-  onSelectTool: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
+  activeTool: EditorTool
+  onSelectTool: (tool: EditorTool) => void
   filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
   onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
   fileName: string | null
@@ -24,13 +29,14 @@ type Props = {
   onTimeline: (text: string) => void
   onTimelineClick?: (entry: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }) => void
   rendererRef?: React.MutableRefObject<CanvasStageRef | null>
-  layers?: { id: string; name: string; w: number; h: number; visible?: boolean }[]
+  layers?: UILayer[]
   activeLayerId?: string | null
   onActiveLayerChange?: (id: string | null) => void
-  onLayersChange?: (layers: { id: string; name: string; w: number; h: number; visible?: boolean }[]) => void
+  onLayersChange?: (layers: UILayer[]) => void
   textLayerMetadata?: TextLayerMetadata
   onTextLayerMetadataChange?: (metadata: TextLayerMetadata) => void
-  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<void>
+  onUpdateTextLayer?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => Promise<string | void>
+  onTextLayerIdUpdate?: (oldLayerId: string, newLayerId: string) => void
   onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
   onUndo?: () => void
   onRedo?: () => void
@@ -61,6 +67,7 @@ export function EditorLayout({
   textLayerMetadata,
   onTextLayerMetadataChange,
   onUpdateTextLayer,
+  onTextLayerIdUpdate,
   onTextLayerCreated,
   onUndo,
   onRedo,
@@ -73,6 +80,7 @@ export function EditorLayout({
   onFileSelect
 }: Props) {
   const canvasStageRef = useRef<CanvasStageRef | null>(null)
+  const [cropState, setCropState] = useState<{ x: number; y: number; w: number; h: number; rotation: number } | null>(null)
 
   const handleDrawConfig = (color: string, size: number) => {
     canvasStageRef.current?.handleDrawConfig?.(color, size)
@@ -153,6 +161,7 @@ export function EditorLayout({
           cropEnabled={activeTool === 'crop'}
           drawEnabled={activeTool === 'draw'}
           textEnabled={activeTool === 'text'}
+          onCropChange={setCropState}
           filterState={filterState}
           onFilterChange={onFilterChange}
           onFileNameChange={onFileNameChange}
@@ -163,6 +172,7 @@ export function EditorLayout({
           onTextLayerCreated={onTextLayerCreated}
           textLayerMetadata={textLayerMetadata}
           onUpdateTextLayer={onUpdateTextLayer}
+          onTextLayerIdUpdate={onTextLayerIdUpdate}
           onSelectTool={onSelectTool}
           onUndo={onUndo}
           onRedo={onRedo}
@@ -176,6 +186,8 @@ export function EditorLayout({
           filterState={filterState}
           onFilterChange={onFilterChange}
           onSelectTool={onSelectTool}
+          cropState={cropState}
+          onCropChange={setCropState}
           fileName={fileName}
           timeline={timeline}
           onTimeline={onTimeline}
@@ -211,7 +223,18 @@ export function EditorLayout({
           onLayerRotationChangeEnd={(id, rotation) => {
             canvasStageRef.current?.handleLayerRotationChangeEnd?.(id, rotation)
           }}
-          renderer={canvasStageRef.current?.getRenderer?.()}
+          onLayerOpacityChange={(id, opacity) => {
+            canvasStageRef.current?.handleLayerOpacityChange?.(id, opacity)
+          }}
+          onLayerBlendModeChange={(id, blendMode) => {
+            canvasStageRef.current?.handleLayerBlendModeChange?.(id, blendMode)
+          }}
+          onLayerLockedChange={(id, locked) => {
+            canvasStageRef.current?.handleLayerLockedChange?.(id, locked)
+          }}
+          onAddLayer={() => {
+            canvasStageRef.current?.handleAddLayer?.()
+          }}
           textLayerMetadata={textLayerMetadata}
           onTextLayerMetadataChange={onTextLayerMetadataChange}
           onUpdateTextLayer={onUpdateTextLayer}
