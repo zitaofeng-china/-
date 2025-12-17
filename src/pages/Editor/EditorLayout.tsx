@@ -21,8 +21,34 @@ import type { TextLayer } from '../../types/tool'
 type Props = {
   activeTool: EditorTool
   onSelectTool: (tool: EditorTool) => void
-  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
-  onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
+  filterState: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights: number
+    shadows: number
+    temperature: number
+    exposure: number
+    clarity: number
+    fade: number
+  }
+  onFilterChange: (next: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights: number
+    shadows: number
+    temperature: number
+    exposure: number
+    clarity: number
+    fade: number
+  }) => void
   fileName: string | null
   onFileNameChange: (name: string | null) => void
   timeline: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }[]

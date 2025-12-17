@@ -60,7 +60,20 @@ const estimateSnapshotBytes = (snapshot?: EditorSnapshot): number => {
 
 export default function Editor() {
   const [activeTool, setActiveTool] = useState<EditorTool>(null)
-  const [filterState, setFilterState] = useState({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 })
+  const [filterState, setFilterState] = useState({
+    brightness: 100,
+    contrast: 100,
+    saturation: 100,
+    hue: 0,
+    blur: 0,
+    sharpen: 0,
+    highlights: 100,
+    shadows: 100,
+    temperature: 0,
+    exposure: 0,
+    clarity: 0,
+    fade: 0
+  })
   const [fileName, setFileName] = useState<string | null>(null)
   // history：用于撤销/重做的完整快照栈；timeline：用于展示的精简记录
   const [history, setHistory] = useState<TimelineEntry[]>([])
@@ -149,7 +162,15 @@ export default function Editor() {
     const renderer = getRenderer()
     if (!renderer) {
       console.warn('无法恢复：renderer未初始化')
-      setFilterState(snapshot.filterState)
+      setFilterState({
+        ...snapshot.filterState,
+        highlights: snapshot.filterState.highlights ?? 100,
+        shadows: snapshot.filterState.shadows ?? 100,
+        temperature: snapshot.filterState.temperature ?? 0,
+        exposure: snapshot.filterState.exposure ?? 0,
+        clarity: snapshot.filterState.clarity ?? 0,
+        fade: snapshot.filterState.fade ?? 0
+      })
       setActiveLayerId(null)
       setFileName(snapshot.fileName)
       setLayers([])
@@ -162,9 +183,18 @@ export default function Editor() {
       const existing = [...renderer.state.layers]
       existing.forEach((l: RendererLayer) => renderer.deleteLayer(l.id))
 
-      // 恢复滤镜状态
-      setFilterState(snapshot.filterState)
-      renderer.setFilter(snapshot.filterState)
+      // 恢复滤镜状态（兼容旧快照缺少高光/阴影的情况）
+      const restoredFilter = {
+        ...snapshot.filterState,
+        highlights: snapshot.filterState.highlights ?? 100,
+        shadows: snapshot.filterState.shadows ?? 100,
+        temperature: snapshot.filterState.temperature ?? 0,
+        exposure: snapshot.filterState.exposure ?? 0,
+        clarity: snapshot.filterState.clarity ?? 0,
+        fade: snapshot.filterState.fade ?? 0
+      }
+      setFilterState(restoredFilter)
+      renderer.setFilter(restoredFilter)
 
       // 按顺序恢复图层
       const newMetadata: TextLayerMetadata = {}
@@ -358,7 +388,20 @@ export default function Editor() {
   const handleReset = () => {
     resetHistory()
     setActiveTool(null)
-    setFilterState({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 })
+    setFilterState({
+      brightness: 100,
+      contrast: 100,
+      saturation: 100,
+      hue: 0,
+      blur: 0,
+      sharpen: 0,
+      highlights: 100,
+      shadows: 100,
+      temperature: 0,
+      exposure: 0,
+      clarity: 0,
+      fade: 0
+    })
     setFileName(null)
     setTimeline([])
     setHistory([])

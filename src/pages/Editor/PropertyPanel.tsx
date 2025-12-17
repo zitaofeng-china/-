@@ -24,8 +24,34 @@ import type { TextLayer } from '../../types/tool'
 
 type Props = {
   activeTool: EditorTool
-  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
-  onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
+  filterState: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights: number
+    shadows: number
+    temperature: number
+    exposure: number
+    clarity: number
+    fade: number
+  }
+  onFilterChange: (next: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights: number
+    shadows: number
+    temperature: number
+    exposure: number
+    clarity: number
+    fade: number
+  }) => void
   onSelectTool: (tool: EditorTool) => void
   cropState?: { x: number; y: number; w: number; h: number; rotation: number } | null
   onCropChange?: (crop: { x: number; y: number; w: number; h: number; rotation: number } | null) => void
@@ -116,131 +142,321 @@ export function PropertyPanel({
   const isTextLayer = activeLayer && activeLayer.name.startsWith('Text:')
   const activeTextMetadata = activeLayerId && isTextLayer ? textLayerMetadata[activeLayerId] : null
 
-  // 滤镜预设配置（移到组件顶层，避免 Hooks 规则违反）
-  const filterPresets = useMemo(() => [
-    { 
-      id: 'original', 
-      name: '原始', 
-      config: { brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 },
-      // 使用外部示例图片作为缩略图，减小项目体积
-      thumbnail: 'https://images.pexels.com/photos/2486168/pexels-photo-2486168.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'vivid', 
-      name: '鲜艳', 
-      config: { brightness: 105, contrast: 120, saturation: 130, hue: 0, blur: 0, sharpen: 0 },
-      thumbnail: 'https://images.pexels.com/photos/462162/pexels-photo-462162.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'warm', 
-      name: '温暖', 
-      config: { brightness: 110, contrast: 105, saturation: 110, hue: 15, blur: 0, sharpen: 0 },
-      thumbnail: 'https://images.pexels.com/photos/573299/pexels-photo-573299.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'cool', 
-      name: '冷色', 
-      config: { brightness: 105, contrast: 110, saturation: 105, hue: -15, blur: 0, sharpen: 0 },
-      thumbnail: 'https://images.pexels.com/photos/346529/pexels-photo-346529.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'vintage', 
-      name: '复古', 
-      config: { brightness: 95, contrast: 90, saturation: 85, hue: 25, blur: 0, sharpen: 0 },
-      thumbnail: 'https://images.pexels.com/photos/712618/pexels-photo-712618.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'bw', 
-      name: '黑白', 
-      config: { brightness: 100, contrast: 110, saturation: 0, hue: 0, blur: 0, sharpen: 0 },
-      // 高对比度黑白建筑
-      thumbnail: 'https://images.pexels.com/photos/3407729/pexels-photo-3407729.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'dramatic', 
-      name: '戏剧', 
-      config: { brightness: 90, contrast: 130, saturation: 120, hue: 0, blur: 0, sharpen: 10 },
-      // 强光对比的人物训练场景
-      thumbnail: 'https://images.pexels.com/photos/1552103/pexels-photo-1552103.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'fade', 
-      name: '褪色', 
-      config: { brightness: 110, contrast: 85, saturation: 80, hue: 0, blur: 0, sharpen: 0 },
-      // 颜色偏淡的森林瀑布
-      thumbnail: 'https://images.pexels.com/photos/460621/pexels-photo-460621.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'portrait', 
-      name: '人像柔肤', 
-      config: { brightness: 108, contrast: 95, saturation: 105, hue: 0, blur: 1, sharpen: 0 },
-      // 柔光人像
-      thumbnail: 'https://images.pexels.com/photos/415829/pexels-photo-415829.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'sunset', 
-      name: '日落', 
-      config: { brightness: 102, contrast: 110, saturation: 135, hue: 10, blur: 0, sharpen: 0 },
-      // 典型日落海边
-      thumbnail: 'https://images.pexels.com/photos/799443/pexels-photo-799443.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'night', 
-      name: '夜景', 
-      config: { brightness: 85, contrast: 125, saturation: 120, hue: -5, blur: 0, sharpen: 5 },
-      // 夜晚城市灯光
-      thumbnail: 'https://images.pexels.com/photos/316933/pexels-photo-316933.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'film', 
-      name: '胶片', 
-      config: { brightness: 98, contrast: 110, saturation: 95, hue: 8, blur: 0, sharpen: 0 },
-      // 胶片相机与胶卷
-      thumbnail: 'https://images.pexels.com/photos/1036936/pexels-photo-1036936.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'softLight', 
-      name: '柔光', 
-      config: { brightness: 108, contrast: 95, saturation: 105, hue: 5, blur: 0.5, sharpen: 0 },
-      // 柔和逆光人像
-      thumbnail: 'https://images.pexels.com/photos/462680/pexels-photo-462680.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'highKey', 
-      name: '高亮', 
-      config: { brightness: 120, contrast: 105, saturation: 110, hue: 0, blur: 0, sharpen: 0 },
-      // 高亮简约室内
-      thumbnail: 'https://images.pexels.com/photos/37347/office-freelance-computer-business-37347.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'lowSaturation', 
-      name: '低饱和', 
-      config: { brightness: 100, contrast: 105, saturation: 60, hue: 0, blur: 0, sharpen: 0 },
-      // 颜色偏灰的街景
-      thumbnail: 'https://images.pexels.com/photos/373893/pexels-photo-373893.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'tealOrange', 
-      name: '电影蓝橙', 
-      config: { brightness: 102, contrast: 120, saturation: 120, hue: 18, blur: 0, sharpen: 5 },
-      // 典型电影蓝橙色调街景
-      thumbnail: 'https://images.pexels.com/photos/258154/pexels-photo-258154.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'warmBrown', 
-      name: '复古棕', 
-      config: { brightness: 100, contrast: 110, saturation: 90, hue: 20, blur: 0, sharpen: 0 },
-      // 棕黄色调的森林小路
-      thumbnail: 'https://images.pexels.com/photos/4827/nature-forest-trees-fog.jpeg?auto=compress&cs=tinysrgb&w=200'
-    },
-    { 
-      id: 'sharpen', 
-      name: '清晰锐化', 
-      config: { brightness: 100, contrast: 120, saturation: 105, hue: 0, blur: 0, sharpen: 20 },
-      // 纹理细节丰富的岩石
-      thumbnail: 'https://images.pexels.com/photos/36487/rock-formation-erosion-red-usa.jpg?auto=compress&cs=tinysrgb&w=200'
-    }
-  ], [])
+  // 滤镜预设配置（包含最新调整项，避免依赖默认值）
+  const filterPresets = useMemo(() => {
+    const base = (partial: Partial<typeof filterState>) => ({
+      brightness: 100,
+      contrast: 100,
+      saturation: 100,
+      hue: 0,
+      blur: 0,
+      sharpen: 0,
+      highlights: 100,
+      shadows: 100,
+      temperature: 0,
+      exposure: 0,
+      clarity: 0,
+      fade: 0,
+      ...partial
+    })
+
+    return [
+      {
+        id: 'original',
+        name: '原始',
+        config: base({}),
+        thumbnail:
+          'https://images.pexels.com/photos/2486168/pexels-photo-2486168.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'vivid',
+        name: '鲜艳',
+        // 增强对比与饱和度，适度提亮和锐化
+        config: base({
+          brightness: 103,
+          contrast: 118,
+          saturation: 130,
+          clarity: 12,
+          highlights: 106
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/462162/pexels-photo-462162.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'warm',
+        name: '温暖',
+        // 偏暖、略微柔和的日落/室内氛围
+        config: base({
+          brightness: 106,
+          contrast: 108,
+          saturation: 112,
+          hue: 10,
+          temperature: 25,
+          exposure: 3,
+          highlights: 108,
+          shadows: 102,
+          clarity: 6
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/573299/pexels-photo-573299.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'cool',
+        name: '冷色',
+        // 偏冷、干净通透
+        config: base({
+          brightness: 100,
+          contrast: 112,
+          saturation: 102,
+          hue: -12,
+          temperature: -25,
+          clarity: 10,
+          highlights: 104,
+          shadows: 96
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/346529/pexels-photo-346529.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'vintage',
+        name: '复古',
+        // 暗部略压、整体褪色偏黄棕
+        config: base({
+          brightness: 98,
+          contrast: 90,
+          saturation: 80,
+          hue: 12,
+          fade: 32,
+          clarity: -6,
+          highlights: 104,
+          shadows: 96
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/712618/pexels-photo-712618.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'bw',
+        name: '黑白',
+        // 纯黑白，高对比、黑位扎实，去掉褪色
+        config: base({
+          brightness: 98,
+          contrast: 132,
+          saturation: 0,
+          hue: 0,
+          clarity: 10,
+          fade: 0,
+          highlights: 110,
+          shadows: 88
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/3407729/pexels-photo-3407729.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'dramatic',
+        name: '戏剧',
+        // 暗部更重、高对比、高清晰度，适合大片戏剧感
+        config: base({
+          brightness: 92,
+          contrast: 136,
+          saturation: 120,
+          hue: 0,
+          clarity: 18,
+          exposure: -4,
+          fade: 3,
+          highlights: 112,
+          shadows: 90
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/1552103/pexels-photo-1552103.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'fade',
+        name: '褪色',
+        // 明显的褪色和对比下降，整体略亮偏灰
+        config: base({
+          brightness: 106,
+          contrast: 82,
+          saturation: 78,
+          fade: 40,
+          clarity: -4,
+          highlights: 108,
+          shadows: 104
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/460621/pexels-photo-460621.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'portrait',
+        name: '人像柔肤',
+        // 适合人像，提亮高光、降低清晰度并略加虚化
+        config: base({
+          brightness: 108,
+          contrast: 92,
+          saturation: 108,
+          blur: 1.2,
+          clarity: -10,
+          highlights: 110,
+          shadows: 104,
+          fade: 6
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/415829/pexels-photo-415829.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'sunset',
+        name: '日落',
+        // 偏暖、高饱和的夕阳色调
+        config: base({
+          brightness: 104,
+          contrast: 112,
+          saturation: 138,
+          hue: 12,
+          temperature: 22,
+          clarity: 8,
+          highlights: 110
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/799443/pexels-photo-799443.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'night',
+        name: '夜景',
+        // 压暗整体、提升对比和清晰度，适合城市夜景
+        config: base({
+          brightness: 84,
+          contrast: 130,
+          saturation: 118,
+          hue: -5,
+          clarity: 14,
+          exposure: -12,
+          fade: 2,
+          highlights: 106,
+          shadows: 92
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/316933/pexels-photo-316933.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'film',
+        name: '胶片',
+        // 轻微褪色、偏暖的胶片感
+        config: base({
+          brightness: 100,
+          contrast: 108,
+          saturation: 92,
+          hue: 5,
+          fade: 22,
+          clarity: -4,
+          highlights: 106,
+          shadows: 98
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/1036936/pexels-photo-1036936.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'softLight',
+        name: '柔光',
+        // 整体柔和、略亮，适度虚化
+        config: base({
+          brightness: 106,
+          contrast: 94,
+          saturation: 104,
+          hue: 4,
+          blur: 0.6,
+          fade: 12,
+          clarity: -4,
+          highlights: 108,
+          shadows: 102
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/462680/pexels-photo-462680.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'highKey',
+        name: '高亮',
+        // 高亮、低对比的高调画面，适度保留细节
+        config: base({
+          brightness: 116,
+          contrast: 104,
+          saturation: 110,
+          exposure: 8,
+          highlights: 116,
+          shadows: 108,
+          clarity: 4,
+          fade: 8
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/37347/office-freelance-computer-business-37347.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'lowSaturation',
+        name: '低饱和',
+        // 降低饱和度但保持一定对比
+        config: base({
+          brightness: 100,
+          contrast: 104,
+          saturation: 55,
+          fade: 10,
+          clarity: 4,
+          highlights: 104
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/373893/pexels-photo-373893.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'tealOrange',
+        name: '电影蓝橙',
+        // 常见电影蓝橙分离色调：阴影偏蓝、高光偏暖
+        config: base({
+          brightness: 102,
+          contrast: 120,
+          saturation: 120,
+          hue: 18,
+          temperature: 8,
+          clarity: 14,
+          highlights: 108,
+          shadows: 96
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/258154/pexels-photo-258154.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'warmBrown',
+        name: '复古棕',
+        // 偏棕的复古暖调，适度褪色
+        config: base({
+          brightness: 100,
+          contrast: 108,
+          saturation: 88,
+          hue: 18,
+          temperature: 18,
+          fade: 20,
+          clarity: -4,
+          highlights: 108,
+          shadows: 96
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/4827/nature-forest-trees-fog.jpeg?auto=compress&cs=tinysrgb&w=200'
+      },
+      {
+        id: 'sharpen',
+        name: '清晰锐化',
+        // 明显提升细节和对比的锐化效果
+        config: base({
+          brightness: 100,
+          contrast: 118,
+          saturation: 110,
+          hue: 0,
+          sharpen: 25,
+          clarity: 20,
+          highlights: 104,
+          shadows: 98
+        }),
+        thumbnail:
+          'https://images.pexels.com/photos/36487/rock-formation-erosion-red-usa.jpg?auto=compress&cs=tinysrgb&w=200'
+      }
+    ]
+  }, [filterState])
 
   // 生成滤镜预览缩略图（使用 useMemo 缓存）
   const filterPreviews = useMemo(() => {
@@ -281,15 +497,60 @@ export function PropertyPanel({
       tempCtx.closePath()
       tempCtx.fill()
 
-      // 应用滤镜效果到主画布
-      const { brightness, contrast, saturation, hue, blur, sharpen } = filter.config
+      // 应用滤镜效果到主画布（与渲染逻辑一致，包含新增属性）
+      const {
+        brightness = 100,
+        contrast = 100,
+        saturation = 100,
+        hue = 0,
+        blur = 0,
+        sharpen = 0,
+        highlights = 100,
+        shadows = 100,
+        temperature = 0,
+        exposure = 0,
+        clarity = 0,
+        fade = 0
+      } = filter.config as typeof filterState
+
       const filters: string[] = []
-      if (brightness !== 100) filters.push(`brightness(${brightness}%)`)
+
+      // 褪色与清晰度增益
+      const clarityContrastBoost = clarity * 0.3
+      const claritySaturationBoost = clarity * 0.1
+      const fadeStrength = Math.max(0, Math.min(100, fade))
+      const fadeBrightnessBoost = fadeStrength * 0.2
+      const fadeContrastDrop = fadeStrength * 0.6
+      const fadeSaturationDrop = fadeStrength * 0.2
+
+      // 亮度相关（高光/阴影/曝光/褪色，高光/阴影为负值时整体变暗，为正值时整体变亮）
+      const hlOffset = (highlights - 100) * 0.3
+      const shOffset = (shadows - 100) * 0.2
+      const expOffset = exposure * 0.8
+      const effectiveBrightness = brightness + hlOffset + shOffset + expOffset + fadeBrightnessBoost
+      if (effectiveBrightness !== 100) filters.push(`brightness(${effectiveBrightness}%)`)
+
+      // 色温
+      if (temperature !== 0) {
+        const t = Math.max(-100, Math.min(100, temperature))
+        const tone = Math.abs(t)
+        const sepiaPct = t > 0 ? tone * 0.6 : tone * 0.25
+        const saturatePct = 100 + t * 0.3
+        const hueShift = t * -0.4
+        if (sepiaPct !== 0) filters.push(`sepia(${sepiaPct}%)`)
+        if (saturatePct !== 100) filters.push(`saturate(${saturatePct}%)`)
+        if (hueShift !== 0) filters.push(`hue-rotate(${hueShift}deg)`)
+      }
+
+      // 对比度 / 饱和度 / 色相 / 模糊 / 锐化
+      const contrastBase = contrast + clarityContrastBoost - fadeContrastDrop
       const effectiveContrast = sharpen > 0 
-        ? contrast + (sharpen / 100) * 20 
-        : contrast
+        ? contrastBase + (sharpen / 100) * 20 
+        : contrastBase
       if (effectiveContrast !== 100) filters.push(`contrast(${effectiveContrast}%)`)
-      if (saturation !== 100) filters.push(`saturate(${saturation}%)`)
+
+      const effectiveSaturation = saturation + claritySaturationBoost - fadeSaturationDrop
+      if (effectiveSaturation !== 100) filters.push(`saturate(${effectiveSaturation}%)`)
       if (hue !== 0) filters.push(`hue-rotate(${hue}deg)`)
       if (blur > 0) filters.push(`blur(${blur}px)`)
       
@@ -375,7 +636,13 @@ export function PropertyPanel({
       saturation: filterState.saturation - 100,
       hue: filterState.hue,
       blur: filterState.blur,
-      sharpen: filterState.sharpen
+      sharpen: filterState.sharpen,
+      highlights: filterState.highlights - 100,
+      shadows: filterState.shadows - 100,
+      temperature: filterState.temperature,
+      exposure: filterState.exposure,
+      clarity: filterState.clarity,
+      fade: filterState.fade
     }
 
     const updateAdjust = (key: string, value: number) => {
@@ -392,6 +659,18 @@ export function PropertyPanel({
         onFilterChange({ ...filterState, blur: value })
       } else if (key === 'sharpen') {
         onFilterChange({ ...filterState, sharpen: value })
+      } else if (key === 'highlights') {
+        onFilterChange({ ...filterState, highlights: value + 100 })
+      } else if (key === 'shadows') {
+        onFilterChange({ ...filterState, shadows: value + 100 })
+      } else if (key === 'temperature') {
+        onFilterChange({ ...filterState, temperature: value })
+      } else if (key === 'exposure') {
+        onFilterChange({ ...filterState, exposure: value })
+      } else if (key === 'clarity') {
+        onFilterChange({ ...filterState, clarity: value })
+      } else if (key === 'fade') {
+        onFilterChange({ ...filterState, fade: value })
       }
     }
 
@@ -409,6 +688,66 @@ export function PropertyPanel({
               min={0}
               max={200}
               onChange={(v) => updateAdjust('brightness', v - 100)}
+            />
+          </div>
+          <div className="property-control-item">
+            <div className="property-control-label">
+              <span>高光</span>
+              <span className="property-control-value">{adjustState.highlights}</span>
+            </div>
+            <Slider
+              value={adjustState.highlights + 100}
+              min={0}
+              max={200}
+              onChange={(v) => updateAdjust('highlights', v - 100)}
+            />
+          </div>
+          <div className="property-control-item">
+            <div className="property-control-label">
+              <span>阴影</span>
+              <span className="property-control-value">{adjustState.shadows}</span>
+            </div>
+            <Slider
+              value={adjustState.shadows + 100}
+              min={0}
+              max={200}
+              onChange={(v) => updateAdjust('shadows', v - 100)}
+            />
+          </div>
+          <div className="property-control-item">
+            <div className="property-control-label">
+              <span>色温</span>
+              <span className="property-control-value">{adjustState.temperature}</span>
+            </div>
+            <Slider
+              value={adjustState.temperature}
+              min={-100}
+              max={100}
+              onChange={(v) => updateAdjust('temperature', v)}
+            />
+          </div>
+          <div className="property-control-item">
+            <div className="property-control-label">
+              <span>曝光</span>
+              <span className="property-control-value">{adjustState.exposure}</span>
+            </div>
+            <Slider
+              value={adjustState.exposure}
+              min={-100}
+              max={100}
+              onChange={(v) => updateAdjust('exposure', v)}
+            />
+          </div>
+          <div className="property-control-item">
+            <div className="property-control-label">
+              <span>清晰度</span>
+              <span className="property-control-value">{adjustState.clarity}</span>
+            </div>
+            <Slider
+              value={adjustState.clarity}
+              min={-100}
+              max={100}
+              onChange={(v) => updateAdjust('clarity', v)}
             />
           </div>
           <div className="property-control-item">
@@ -471,9 +810,39 @@ export function PropertyPanel({
               onChange={(v) => updateAdjust('sharpen', v)}
             />
           </div>
+          <div className="property-control-item">
+            <div className="property-control-label">
+              <span>褪色</span>
+              <span className="property-control-value">{adjustState.fade}</span>
+            </div>
+            <Slider
+              value={adjustState.fade}
+              min={0}
+              max={100}
+              onChange={(v) => updateAdjust('fade', v)}
+            />
+          </div>
         </div>
         <div className="property-actions">
-          <button className="property-button" onClick={() => onFilterChange({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 })}>
+          <button
+            className="property-button"
+            onClick={() =>
+              onFilterChange({
+                brightness: 100,
+                contrast: 100,
+                saturation: 100,
+                hue: 0,
+                blur: 0,
+                sharpen: 0,
+                highlights: 100,
+                  shadows: 100,
+                  temperature: 0,
+                  exposure: 0,
+                  clarity: 0,
+                  fade: 0
+              })
+            }
+          >
             重置
           </button>
         </div>
@@ -497,7 +866,21 @@ export function PropertyPanel({
                 key={filter.id}
                 className="filter-item"
                 onClick={() => {
-                  onFilterChange(filter.config)
+                  onFilterChange({
+                    ...filterState,
+                    brightness: filter.config.brightness,
+                    contrast: filter.config.contrast,
+                    saturation: filter.config.saturation,
+                    hue: filter.config.hue,
+                    blur: filter.config.blur,
+                    sharpen: filter.config.sharpen,
+                    highlights: filter.config.highlights,
+                    shadows: filter.config.shadows,
+                    temperature: filter.config.temperature,
+                    exposure: filter.config.exposure,
+                    clarity: filter.config.clarity,
+                    fade: filter.config.fade
+                  })
                   onTimeline(`应用滤镜: ${filter.name}`)
                 }}
               >
