@@ -73,6 +73,7 @@ export default function Editor() {
   const rendererRef = React.useRef<CanvasStageRef | null>(null)
   const { getRenderer } = useRenderer(rendererRef)
   const historyBytesRef = React.useRef<number>(0)
+  const [zoomPct, setZoomPct] = useState(100)
 
   // ==================== 组件内部函数 ====================
 
@@ -403,7 +404,6 @@ export default function Editor() {
 
   const renderer = getRenderer()
   const canvasSize = renderer?.state.imgSize
-  const zoom = renderer ? Math.round(renderer.state.zoom * 100) : 100
 
   return (
     <div className="editor-container" style={{ height: '100vh', overflow: 'hidden' }}>
@@ -497,7 +497,8 @@ export default function Editor() {
         onExport={handleExport}
         onReset={handleReset}
         canvasSize={canvasSize ? { width: canvasSize.w, height: canvasSize.h } : undefined}
-        zoom={zoom}
+        zoom={zoomPct}
+        onZoomChange={setZoomPct}
         onFileSelect={handleFileSelect}
       />
     </div>

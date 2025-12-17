@@ -12,9 +12,21 @@ type Props = {
   crop?: { x: number; y: number; w: number; h: number; rotation: number } | null
   onCropChange?: (crop: { x: number; y: number; w: number; h: number; rotation: number }) => void
   imageSize?: { width: number; height: number }
+  /** 是否显示裁剪九宫格等辅助线，由外部控制 */
+  guidesVisible?: boolean
+  /** 切换裁剪辅助线显示状态 */
+  onGuidesVisibleChange?: (visible: boolean) => void
 }
 
-export function CropTool({ onConfirm, onCancel, crop, onCropChange, imageSize }: Props) {
+export function CropTool({
+  onConfirm,
+  onCancel,
+  crop,
+  onCropChange,
+  imageSize,
+  guidesVisible = true,
+  onGuidesVisibleChange
+}: Props) {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('3:2')
   const [width, setWidth] = useState(crop?.w || 0)
   const [height, setHeight] = useState(crop?.h || 0)
@@ -213,7 +225,19 @@ export function CropTool({ onConfirm, onCancel, crop, onCropChange, imageSize }:
         </div>
       </div>
 
-      {/* 操作按钮 */}
+      {/* 辅助线开关（单独一行） */}
+      <div className="crop-tool-actions" style={{ marginBottom: 12 }}>
+        <button
+          className="crop-button crop-button-secondary"
+          type="button"
+          style={{ width: '100%' }}
+          onClick={() => onGuidesVisibleChange?.(!guidesVisible)}
+        >
+          {guidesVisible ? '取消辅助线' : '显示辅助线'}
+        </button>
+      </div>
+
+      {/* 应用 / 取消按钮 */}
       <div className="crop-tool-actions">
         <button
           className="crop-button crop-button-primary"

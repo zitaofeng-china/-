@@ -29,6 +29,8 @@ type Props = {
   onSelectTool: (tool: EditorTool) => void
   cropState?: { x: number; y: number; w: number; h: number; rotation: number } | null
   onCropChange?: (crop: { x: number; y: number; w: number; h: number; rotation: number } | null) => void
+  cropGuidesVisible?: boolean
+  onCropGuidesVisibleChange?: (visible: boolean) => void
   fileName: string | null
   timeline: { id: string; text: string; ts: number; snapshot?: EditorSnapshot }[]
   onTimeline: (text: string) => void
@@ -44,6 +46,8 @@ type Props = {
   onLayerVisibilityToggle?: (id: string, visible: boolean) => void
   onLayerMove?: (id: string, direction: 'up' | 'down') => void
   onLayerDuplicate?: (id: string) => void
+  onLayerRename?: (id: string, name: string) => void
+  onLayerAlignCenter?: (id: string) => void
   onLayerScaleChange?: (id: string, scale: number) => void
   onLayerScaleChangeEnd?: (id: string, scale: number) => void
   onLayerRotationChange?: (id: string, rotation: number) => void
@@ -66,6 +70,8 @@ export function PropertyPanel({
   onSelectTool,
   cropState,
   onCropChange,
+  cropGuidesVisible = true,
+  onCropGuidesVisibleChange,
   fileName,
   timeline,
   onTimeline,
@@ -81,6 +87,8 @@ export function PropertyPanel({
   onLayerVisibilityToggle,
   onLayerMove,
   onLayerDuplicate,
+  onLayerRename,
+  onLayerAlignCenter,
   onLayerScaleChange,
   onLayerScaleChangeEnd,
   onLayerRotationChange,
@@ -113,42 +121,124 @@ export function PropertyPanel({
     { 
       id: 'original', 
       name: '原始', 
-      config: { brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 }
+      config: { brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 },
+      // 使用外部示例图片作为缩略图，减小项目体积
+      thumbnail: 'https://images.pexels.com/photos/2486168/pexels-photo-2486168.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'vivid', 
       name: '鲜艳', 
-      config: { brightness: 105, contrast: 120, saturation: 130, hue: 0, blur: 0, sharpen: 0 }
+      config: { brightness: 105, contrast: 120, saturation: 130, hue: 0, blur: 0, sharpen: 0 },
+      thumbnail: 'https://images.pexels.com/photos/462162/pexels-photo-462162.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'warm', 
       name: '温暖', 
-      config: { brightness: 110, contrast: 105, saturation: 110, hue: 15, blur: 0, sharpen: 0 }
+      config: { brightness: 110, contrast: 105, saturation: 110, hue: 15, blur: 0, sharpen: 0 },
+      thumbnail: 'https://images.pexels.com/photos/573299/pexels-photo-573299.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'cool', 
       name: '冷色', 
-      config: { brightness: 105, contrast: 110, saturation: 105, hue: -15, blur: 0, sharpen: 0 }
+      config: { brightness: 105, contrast: 110, saturation: 105, hue: -15, blur: 0, sharpen: 0 },
+      thumbnail: 'https://images.pexels.com/photos/346529/pexels-photo-346529.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'vintage', 
       name: '复古', 
-      config: { brightness: 95, contrast: 90, saturation: 85, hue: 25, blur: 0, sharpen: 0 }
+      config: { brightness: 95, contrast: 90, saturation: 85, hue: 25, blur: 0, sharpen: 0 },
+      thumbnail: 'https://images.pexels.com/photos/712618/pexels-photo-712618.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'bw', 
       name: '黑白', 
-      config: { brightness: 100, contrast: 110, saturation: 0, hue: 0, blur: 0, sharpen: 0 }
+      config: { brightness: 100, contrast: 110, saturation: 0, hue: 0, blur: 0, sharpen: 0 },
+      // 高对比度黑白建筑
+      thumbnail: 'https://images.pexels.com/photos/3407729/pexels-photo-3407729.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'dramatic', 
       name: '戏剧', 
-      config: { brightness: 90, contrast: 130, saturation: 120, hue: 0, blur: 0, sharpen: 10 }
+      config: { brightness: 90, contrast: 130, saturation: 120, hue: 0, blur: 0, sharpen: 10 },
+      // 强光对比的人物训练场景
+      thumbnail: 'https://images.pexels.com/photos/1552103/pexels-photo-1552103.jpeg?auto=compress&cs=tinysrgb&w=200'
     },
     { 
       id: 'fade', 
       name: '褪色', 
-      config: { brightness: 110, contrast: 85, saturation: 80, hue: 0, blur: 0, sharpen: 0 }
+      config: { brightness: 110, contrast: 85, saturation: 80, hue: 0, blur: 0, sharpen: 0 },
+      // 颜色偏淡的森林瀑布
+      thumbnail: 'https://images.pexels.com/photos/460621/pexels-photo-460621.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'portrait', 
+      name: '人像柔肤', 
+      config: { brightness: 108, contrast: 95, saturation: 105, hue: 0, blur: 1, sharpen: 0 },
+      // 柔光人像
+      thumbnail: 'https://images.pexels.com/photos/415829/pexels-photo-415829.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'sunset', 
+      name: '日落', 
+      config: { brightness: 102, contrast: 110, saturation: 135, hue: 10, blur: 0, sharpen: 0 },
+      // 典型日落海边
+      thumbnail: 'https://images.pexels.com/photos/799443/pexels-photo-799443.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'night', 
+      name: '夜景', 
+      config: { brightness: 85, contrast: 125, saturation: 120, hue: -5, blur: 0, sharpen: 5 },
+      // 夜晚城市灯光
+      thumbnail: 'https://images.pexels.com/photos/316933/pexels-photo-316933.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'film', 
+      name: '胶片', 
+      config: { brightness: 98, contrast: 110, saturation: 95, hue: 8, blur: 0, sharpen: 0 },
+      // 胶片相机与胶卷
+      thumbnail: 'https://images.pexels.com/photos/1036936/pexels-photo-1036936.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'softLight', 
+      name: '柔光', 
+      config: { brightness: 108, contrast: 95, saturation: 105, hue: 5, blur: 0.5, sharpen: 0 },
+      // 柔和逆光人像
+      thumbnail: 'https://images.pexels.com/photos/462680/pexels-photo-462680.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'highKey', 
+      name: '高亮', 
+      config: { brightness: 120, contrast: 105, saturation: 110, hue: 0, blur: 0, sharpen: 0 },
+      // 高亮简约室内
+      thumbnail: 'https://images.pexels.com/photos/37347/office-freelance-computer-business-37347.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'lowSaturation', 
+      name: '低饱和', 
+      config: { brightness: 100, contrast: 105, saturation: 60, hue: 0, blur: 0, sharpen: 0 },
+      // 颜色偏灰的街景
+      thumbnail: 'https://images.pexels.com/photos/373893/pexels-photo-373893.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'tealOrange', 
+      name: '电影蓝橙', 
+      config: { brightness: 102, contrast: 120, saturation: 120, hue: 18, blur: 0, sharpen: 5 },
+      // 典型电影蓝橙色调街景
+      thumbnail: 'https://images.pexels.com/photos/258154/pexels-photo-258154.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'warmBrown', 
+      name: '复古棕', 
+      config: { brightness: 100, contrast: 110, saturation: 90, hue: 20, blur: 0, sharpen: 0 },
+      // 棕黄色调的森林小路
+      thumbnail: 'https://images.pexels.com/photos/4827/nature-forest-trees-fog.jpeg?auto=compress&cs=tinysrgb&w=200'
+    },
+    { 
+      id: 'sharpen', 
+      name: '清晰锐化', 
+      config: { brightness: 100, contrast: 120, saturation: 105, hue: 0, blur: 0, sharpen: 20 },
+      // 纹理细节丰富的岩石
+      thumbnail: 'https://images.pexels.com/photos/36487/rock-formation-erosion-red-usa.jpg?auto=compress&cs=tinysrgb&w=200'
     }
   ], [])
 
@@ -236,6 +326,8 @@ export function PropertyPanel({
               onCropChange?.(newCrop)
             }}
             imageSize={imageSize}
+            guidesVisible={cropGuidesVisible}
+            onGuidesVisibleChange={onCropGuidesVisibleChange}
           />
         </div>
       )
@@ -397,7 +489,9 @@ export function PropertyPanel({
         <h3 className="property-panel-title">滤镜</h3>
         <div className="filter-grid">
           {filterPresets.map((filter) => {
-            const previewUrl = filterPreviews[filter.id]
+          const thumbUrl = (filter as any).thumbnail as string | undefined
+          const fallbackUrl = filterPreviews[filter.id]
+          const previewUrl = thumbUrl || fallbackUrl
             return (
               <button
                 key={filter.id}
@@ -409,7 +503,20 @@ export function PropertyPanel({
               >
                 <div className="filter-preview">
                   {previewUrl ? (
-                    <img src={previewUrl} alt={filter.name} className="filter-preview-image" />
+                    <img
+                      src={previewUrl}
+                      alt={filter.name}
+                      className="filter-preview-image"
+                      loading="lazy"
+                      onError={(e) => {
+                        if (fallbackUrl && e.currentTarget.src !== fallbackUrl) {
+                          e.currentTarget.src = fallbackUrl
+                        } else {
+                          // 无法加载外部资源和本地预览时，隐藏图片，保留占位 SVG
+                          e.currentTarget.style.display = 'none'
+                        }
+                      }}
+                    />
                   ) : (
                     <svg viewBox="0 0 100 100" className="filter-icon">
                       <rect width="100" height="100" fill="#4a90e2" />
@@ -464,7 +571,7 @@ export function PropertyPanel({
             return (
               <div
                 key={l.id}
-                className={`layer-item ${isActive ? 'active' : ''} ${!isVisible ? 'hidden' : ''} ${isLocked ? 'locked' : ''}`}
+                className={`layer-item ${isActive ? 'active' : ''} ${!isVisible ? 'layer-hidden' : ''} ${isLocked ? 'locked' : ''}`}
                 onClick={() => {
                   // 即使锁定也可以选中，只是不能移动等操作
                   onActiveLayerChange?.(l.id)
@@ -481,6 +588,19 @@ export function PropertyPanel({
                   >
                     {isVisible ? '👁' : '👁‍🗨'}
                   </button>
+            <button
+              className="layer-visibility-button"
+              onClick={(e) => {
+                e.stopPropagation()
+                const newName = prompt('重命名图层', l.name)
+                if (newName !== null) {
+                  onLayerRename?.(l.id, newName)
+                }
+              }}
+              title="重命名图层"
+            >
+              ✏️
+            </button>
                   <div className="layer-info">
                     <div className="layer-name">{l.name}</div>
                     <div className="layer-size">{l.w} × {l.h}</div>
@@ -498,6 +618,41 @@ export function PropertyPanel({
                 </div>
                 {isActive && layer && (
                   <div className="layer-properties">
+                    <div className="layer-property actions-row">
+                      <button
+                        className="layer-action-button"
+                        disabled={isLocked}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!isLocked) onLayerAlignCenter?.(l.id)
+                        }}
+                        title={isLocked ? '锁定图层无法居中' : '居中到画布'}
+                      >
+                        居中
+                      </button>
+                      <button
+                        className="layer-action-button"
+                        disabled={isLocked}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!isLocked) onLayerMove?.(l.id, 'up')
+                        }}
+                        title={isLocked ? '锁定图层无法上移' : '上移一层'}
+                      >
+                        上移
+                      </button>
+                      <button
+                        className="layer-action-button"
+                        disabled={isLocked}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!isLocked) onLayerMove?.(l.id, 'down')
+                        }}
+                        title={isLocked ? '锁定图层无法下移' : '下移一层'}
+                      >
+                        下移
+                      </button>
+                    </div>
                     <div className="layer-property">
                       <span>不透明度:</span>
                       <div className="layer-property-control">

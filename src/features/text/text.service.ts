@@ -221,60 +221,140 @@ export async function updateTextLayer(
     throw new Error('文本图层不存在')
   }
 
-  // 获取当前位置（考虑padding，因为文本在canvas中有padding）
-  const padding = 20
-  const currentX = layer.offset.x + padding
-  const currentY = layer.offset.y + padding
+  // 生成新的文本位图（保持当前 offset 不变）
+  const newBitmap = await (async () => {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('无法创建Canvas上下文')
 
-  // 保存图层的其他属性
-  const savedVisible = layer.visible
-  const savedScale = layer.scale
-  const savedRotation = layer.rotation
-  const savedOpacity = layer.opacity
-  const savedBlendMode = layer.blendMode
-  const savedLocked = layer.locked
-  const savedIndex = renderer.state.layers.findIndex((l) => l.id === layerId)
-
-  // 删除旧图层
-  layer.bitmap.close?.()
-  if (savedIndex !== -1) {
-    renderer.state.layers.splice(savedIndex, 1)
-  }
-
-  // 创建新图层（保持相同位置）
-  const newLayerId = await addTextLayer(renderer, { ...textConfig, x: currentX, y: currentY })
-  
-  // 恢复图层的其他属性
-  const newLayer = renderer.state.layers.find((l) => l.id === newLayerId)
-  if (newLayer) {
-    newLayer.visible = savedVisible
-    newLayer.scale = savedScale
-    newLayer.rotation = savedRotation
-    newLayer.opacity = savedOpacity
-    newLayer.blendMode = savedBlendMode
-    newLayer.locked = savedLocked
-    
-    // 将新图层移动到原来的位置
-    const currentIndex = renderer.state.layers.findIndex((l) => l.id === newLayerId)
-    if (currentIndex !== -1 && currentIndex !== savedIndex) {
-      if (currentIndex < savedIndex) {
-        // 向后移动
-        for (let i = currentIndex; i < savedIndex; i++) {
-          renderer.moveLayer(newLayerId, 'down')
-        }
-      } else {
-        // 向前移动
-        for (let i = currentIndex; i > savedIndex; i--) {
-          renderer.moveLayer(newLayerId, 'up')
-        }
-      }
+    const applyTransform = (s: string) => {
+      if (textConfig.textTransform === 'uppercase') return s.toUpperCase()
+      if (textConfig.textTransform === 'lowercase') return s.toLowerCase()
+      if (textConfig.textTransform === 'capitalize') return s.replace(/\b\w/g, (c) => c.toUpperCase())
+      return s
     }
-  }
-  
+
+    const linesRaw = textConfig.text.split('\n')
+    const lines = linesRaw.map(applyTransform)
+
+    const fontWeight = textConfig.bold ? 'bold' : 'normal'
+    const fontStyle = textConfig.italic ? 'italic' : 'normal'
+    ctx.font = `${fontStyle} ${fontWeight} ${textConfig.fontSize}px ${textConfig.fontFamily}`
+    ctx.textAlign = textConfig.align
+    ctx.textBaseline = 'top'
+
+    const measureLine = (line: string) => {
+      const chars = Array.from(line)
+      if (chars.length === 0) return 0
+      const base = chars.reduce((sum, ch) => sum + ctx.measureText(ch).width, 0)
+      const spacing = (textConfig.letterSpacing ?? 0) * (chars.length - 1)
+      return base + spacing
+    }
+
+    const metrics = lines.map((line) => measureLine(line))
+    const textWidth = Math.max(...metrics, 0)
+    const lineHeightPx = textConfig.fontSize * (textConfig.lineHeight ?? 1.2)
+    const textHeight = lineHeightPx * lines.length
+    const padding = Math.max(0, textConfig.backgroundPadding ?? 20)
+
+    canvas.width = Math.max(textWidth + padding * 2, 100)
+    canvas.height = Math.max(textHeight + padding * 2, 50)
+
+    ctx.font = `${fontStyle} ${fontWeight} ${textConfig.fontSize}px ${textConfig.fontFamily}`
+    ctx.textAlign = textConfig.align
+    ctx.textBaseline = 'top'
+    ctx.globalAlpha = textConfig.opacity ?? 1
+    ctx.shadowColor = textConfig.shadowColor
+    ctx.shadowBlur = textConfig.shadowBlur
+    ctx.shadowOffsetX = textConfig.shadowOffsetX
+    ctx.shadowOffsetY = textConfig.shadowOffsetY
+    ctx.fillStyle = textConfig.color
+
+    const drawRoundedRect = (x: number, y: number, w: number, h: number, r: number) => {
+      const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2))
+      ctx.beginPath()
+      ctx.moveTo(x + radius, y)
+      ctx.lineTo(x + w - radius, y)
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius)
+      ctx.lineTo(x + w, y + h - radius)
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h)
+      ctx.lineTo(x + radius, y + h)
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius)
+      ctx.lineTo(x, y + radius)
+      ctx.quadraticCurveTo(x, y, x + radius, y)
+      ctx.closePath()
+    }
+
+    if (textConfig.backgroundColor && textConfig.backgroundColor !== 'transparent') {
+      ctx.save()
+      ctx.fillStyle = textConfig.backgroundColor
+      ctx.globalAlpha = textConfig.opacity ?? 1
+      drawRoundedRect(padding, padding, textWidth, textHeight, textConfig.backgroundRadius ?? 0)
+      ctx.fill()
+      ctx.restore()
+    }
+
+    const textXBase = padding + (textConfig.align === 'center' ? textWidth / 2 : textConfig.align === 'right' ? textWidth : 0)
+
+    lines.forEach((line, idx) => {
+      const y = padding + idx * lineHeightPx
+      const chars = Array.from(line)
+      const totalWidth = metrics[idx]
+      const startX =
+        textConfig.align === 'center'
+          ? textXBase - totalWidth / 2
+          : textConfig.align === 'right'
+          ? textXBase - totalWidth
+          : padding
+
+      let cursor = startX
+      chars.forEach((ch) => {
+        const w = ctx.measureText(ch).width
+        if (textConfig.strokeWidth > 0) {
+          ctx.lineWidth = textConfig.strokeWidth
+          ctx.strokeStyle = textConfig.strokeColor
+          ctx.strokeText(ch, cursor, y)
+        }
+        ctx.fillText(ch, cursor, y)
+        cursor += w + (textConfig.letterSpacing ?? 0)
+      })
+
+      const underlineY = y + textConfig.fontSize * 1.1
+      const strikeY = y + textConfig.fontSize * 0.55
+      const lineWidth = totalWidth
+      if (textConfig.underline) {
+        ctx.save()
+        ctx.strokeStyle = textConfig.color
+        ctx.lineWidth = Math.max(1, textConfig.fontSize * 0.05)
+        ctx.beginPath()
+        ctx.moveTo(startX, underlineY)
+        ctx.lineTo(startX + lineWidth, underlineY)
+        ctx.stroke()
+        ctx.restore()
+      }
+      if (textConfig.strike) {
+        ctx.save()
+        ctx.strokeStyle = textConfig.color
+        ctx.lineWidth = Math.max(1, textConfig.fontSize * 0.05)
+        ctx.beginPath()
+        ctx.moveTo(startX, strikeY)
+        ctx.lineTo(startX + lineWidth, strikeY)
+        ctx.stroke()
+        ctx.restore()
+      }
+    })
+
+    return createImageBitmap(canvas)
+  })()
+
+  // 更新现有图层位图与名称，保持ID与顺序不变
+  layer.bitmap.close?.()
+  layer.bitmap = newBitmap
+  layer.name = `Text: ${textConfig.text.substring(0, 20)}`
+
   renderer.render()
-  
-  // 返回新图层 ID
-  return newLayerId
+
+  return layerId
 }
 
 /**
