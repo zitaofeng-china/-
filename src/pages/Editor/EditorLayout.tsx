@@ -47,6 +47,7 @@ type Props = {
   canvasSize?: { width: number; height: number }
   zoom?: number
   onFileSelect?: (file: File) => void
+  onZoomChange?: (zoom: number) => void
 }
 
 export function EditorLayout({
@@ -77,10 +78,12 @@ export function EditorLayout({
   onReset,
   canvasSize,
   zoom = 100,
-  onFileSelect
+  onFileSelect,
+  onZoomChange
 }: Props) {
   const canvasStageRef = useRef<CanvasStageRef | null>(null)
   const [cropState, setCropState] = useState<{ x: number; y: number; w: number; h: number; rotation: number } | null>(null)
+  const [cropGuidesVisible, setCropGuidesVisible] = useState(true)
 
   const handleDrawConfig = (color: string, size: number) => {
     canvasStageRef.current?.handleDrawConfig?.(color, size)
@@ -153,33 +156,37 @@ export function EditorLayout({
             onRedo={onRedo}
             canUndo={canUndo}
             canRedo={canRedo}
+            onExport={onExport}
+            onReset={onReset}
           />
         </aside>
         <main className="editor-canvas">
-        <CanvasStage
-          ref={canvasStageRef}
-          cropEnabled={activeTool === 'crop'}
-          drawEnabled={activeTool === 'draw'}
-          textEnabled={activeTool === 'text'}
-          onCropChange={setCropState}
-          filterState={filterState}
-          onFilterChange={onFilterChange}
-          onFileNameChange={onFileNameChange}
-          onTimeline={onTimeline}
-          activeLayerId={activeLayerId}
-          onActiveLayerChange={onActiveLayerChange}
-          onLayersChange={onLayersChange}
-          onTextLayerCreated={onTextLayerCreated}
-          textLayerMetadata={textLayerMetadata}
-          onUpdateTextLayer={onUpdateTextLayer}
-          onTextLayerIdUpdate={onTextLayerIdUpdate}
-          onSelectTool={onSelectTool}
-          onUndo={onUndo}
-          onRedo={onRedo}
-          canUndo={canUndo}
-          canRedo={canRedo}
-        />
-      </main>
+          <CanvasStage
+            ref={canvasStageRef}
+            cropEnabled={activeTool === 'crop'}
+            cropGuidesVisible={cropGuidesVisible}
+            drawEnabled={activeTool === 'draw'}
+            textEnabled={activeTool === 'text'}
+            onCropChange={setCropState}
+            onZoomChange={onZoomChange}
+            filterState={filterState}
+            onFilterChange={onFilterChange}
+            onFileNameChange={onFileNameChange}
+            onTimeline={onTimeline}
+            activeLayerId={activeLayerId}
+            onActiveLayerChange={onActiveLayerChange}
+            onLayersChange={onLayersChange}
+            onTextLayerCreated={onTextLayerCreated}
+            textLayerMetadata={textLayerMetadata}
+            onUpdateTextLayer={onUpdateTextLayer}
+            onTextLayerIdUpdate={onTextLayerIdUpdate}
+            onSelectTool={onSelectTool}
+            onUndo={onUndo}
+            onRedo={onRedo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+          />
+        </main>
       <section className="editor-panel">
         <PropertyPanel
           activeTool={activeTool}
@@ -188,6 +195,8 @@ export function EditorLayout({
           onSelectTool={onSelectTool}
           cropState={cropState}
           onCropChange={setCropState}
+          cropGuidesVisible={cropGuidesVisible}
+          onCropGuidesVisibleChange={setCropGuidesVisible}
           fileName={fileName}
           timeline={timeline}
           onTimeline={onTimeline}
@@ -222,6 +231,12 @@ export function EditorLayout({
           }}
           onLayerRotationChangeEnd={(id, rotation) => {
             canvasStageRef.current?.handleLayerRotationChangeEnd?.(id, rotation)
+          }}
+          onLayerRename={(id, name) => {
+            canvasStageRef.current?.handleLayerRename?.(id, name)
+          }}
+          onLayerAlignCenter={(id) => {
+            canvasStageRef.current?.handleLayerAlignCenter?.(id)
           }}
           onLayerOpacityChange={(id, opacity) => {
             canvasStageRef.current?.handleLayerOpacityChange?.(id, opacity)

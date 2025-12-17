@@ -73,8 +73,8 @@ export async function exportImage(
     throw new Error('没有可导出的可见图层')
   }
 
-  // 计算实际画布尺寸（添加一些内边距）
-  const padding = 10
+  // 计算实际画布尺寸（不再添加额外白色边距，紧贴内容导出）
+  const padding = 0
   const canvasW = Math.ceil(maxX - minX + padding * 2)
   const canvasH = Math.ceil(maxY - minY + padding * 2)
   const offsetX = minX - padding
@@ -90,10 +90,6 @@ export async function exportImage(
   // 设置Canvas尺寸为计算出的边界框尺寸
   canvas.width = canvasW
   canvas.height = canvasH
-
-  // 填充白色背景
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, canvasW, canvasH)
 
   // 应用滤镜
   const { brightness, contrast, saturation, hue, blur, sharpen } = renderer.state.filter

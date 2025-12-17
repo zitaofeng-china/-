@@ -31,6 +31,8 @@ type Hit = { mode: 'move' } | { mode: 'resize'; handle: CropHandle } | { mode: '
 
 type Props = {
   cropEnabled: boolean
+  /** 是否显示裁剪辅助线（九宫格），由外部控制 */
+  cropGuidesVisible?: boolean
   drawEnabled?: boolean
   textEnabled?: boolean
   filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
@@ -39,6 +41,7 @@ type Props = {
   onTimeline: (text: string) => void
   onLayersChange?: (layers: UILayer[]) => void
   onCropChange?: (crop: CropState | null) => void
+  onZoomChange?: (zoomPct: number) => void
   activeLayerId?: string | null
   onActiveLayerChange?: (id: string | null) => void
   onTextLayerCreated?: (layerId: string, config: Omit<TextLayer, 'id' | 'x' | 'y'>) => void
@@ -70,14 +73,16 @@ const CanvasStage = React.forwardRef<
   Props
 >(function CanvasStage({
   cropEnabled,
+  cropGuidesVisible = true,
   drawEnabled = false,
   textEnabled = false,
   filterState,
   onFilterChange,
   onFileNameChange,
-  onTimeline,
+      onTimeline,
   onLayersChange,
   onCropChange,
+      onZoomChange,
   activeLayerId,
   onActiveLayerChange,
   onTextLayerCreated,
@@ -89,7 +94,7 @@ const CanvasStage = React.forwardRef<
   onRedo,
   canUndo,
   canRedo
-}, ref) {
+  }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bgCanvasRef = useRef<HTMLCanvasElement>(null)
   const uiCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -172,7 +177,9 @@ const CanvasStage = React.forwardRef<
   const syncZoom = () => {
     const renderer = rendererRef.current
     if (!renderer) return
-    setZoomPct(Math.round(renderer.state.zoom * 100))
+    const z = Math.round(renderer.state.zoom * 100)
+    setZoomPct(z)
+    onZoomChange?.(z)
   }
 
   const getTransforms = () => {
@@ -336,7 +343,7 @@ const CanvasStage = React.forwardRef<
       ctx.setLineDash([])
 
       // 绘制九宫格辅助线（非常明显）
-      {
+      if (cropEnabled && cropGuidesVisible) {
         // 计算九宫格线的位置（1/3 和 2/3 位置）
         const thirdW = crop.w / 3
         const thirdH = crop.h / 3
@@ -609,10 +616,8 @@ const CanvasStage = React.forwardRef<
     }
     
     if (!rendererRef.current || rendererRef.current.state.layers.length === 0) {
-      // 没有图层时，使用画布拖拽
-      if (!cropEnabled) {
-    dragHandlers.onMouseDown(e)
-      }
+      // 没有图层时，允许拖拽画布（无论是否处于裁剪模式）
+      dragHandlers.onMouseDown(e)
       return
     }
     
@@ -622,6 +627,10 @@ const CanvasStage = React.forwardRef<
     
     // 如果是绘图模式，开始绘制
     if (drawEnabled) {
+      // 如果选中图层且被锁定，则不允许绘制
+      if (activeLayerId && checkLayerLocked(activeLayerId)) {
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       setIsDrawing(true)
@@ -744,15 +753,8 @@ const CanvasStage = React.forwardRef<
         return
       }
     } else {
-      // 点击在空白处，取消选中（可选）或保持当前选中
-      // 如果当前没有选中，可以使用画布拖拽
-      if (!activeLayerId && !cropEnabled) {
-        dragHandlers.onMouseDown(e)
-      } else if (!cropEnabled) {
-        // 有选中图层但点击空白处，可选：取消选中或拖拽画布
-        // 这里我们选择拖拽画布
-        dragHandlers.onMouseDown(e)
-      }
+      // 点击在空白处，允许拖拽画布（裁剪模式下也可以平移视图）
+      dragHandlers.onMouseDown(e)
     }
   }
 
@@ -807,6 +809,11 @@ const CanvasStage = React.forwardRef<
     
     // 绘制完成
     if (drawEnabled && isDrawing && drawPoints.length > 0 && rendererRef.current) {
+      if (activeLayerId && checkLayerLocked(activeLayerId)) {
+        setDrawPoints([])
+        setIsDrawing(false)
+        return
+      }
       try {
         const stroke = createStroke(drawPoints, drawColor, drawSize)
         await drawStroke(rendererRef.current, stroke, activeLayerId || undefined)
@@ -1021,6 +1028,37 @@ const CanvasStage = React.forwardRef<
     [syncLayers, onTimeline, checkLayerLocked]
   )
 
+  const handleLayerRename = useCallback(
+    (id: string, newName: string) => {
+      const renderer = rendererRef.current
+      if (!renderer) return
+      if (checkLayerLocked(id)) return
+      renderer.renameLayer(id, newName.trim() || '未命名图层')
+      syncLayers()
+      onTimeline(`重命名图层：${newName}`)
+    },
+    [syncLayers, onTimeline, checkLayerLocked]
+  )
+
+  const handleLayerAlignCenter = useCallback(
+    (id: string) => {
+      const renderer = rendererRef.current
+      if (!renderer) return
+      if (checkLayerLocked(id)) return
+      const layer = renderer.getLayer(id)
+      if (!layer) return
+      const { w: imgW, h: imgH } = renderer.state.imgSize
+      const offset = {
+        x: (imgW - layer.bitmap.width) / 2,
+        y: (imgH - layer.bitmap.height) / 2
+      }
+      renderer.setLayerOffset(id, offset)
+      syncLayers()
+      onTimeline('图层居中')
+    },
+    [syncLayers, onTimeline, checkLayerLocked]
+  )
+
   const handleLayerScaleChange = useCallback((id: string, scale: number) => {
     const renderer = rendererRef.current
     if (!renderer) return
@@ -1117,6 +1155,8 @@ const CanvasStage = React.forwardRef<
       handleLayerBlendModeChange: handleLayerBlendModeChange,
       handleLayerLockedChange: handleLayerLockedChange,
       handleAddLayer: handleAddLayer,
+      handleLayerRename: handleLayerRename,
+      handleLayerAlignCenter: handleLayerAlignCenter,
       handleLayerScaleChange: handleLayerScaleChange,
       handleLayerScaleChangeEnd: handleLayerScaleChangeEnd,
       handleLayerRotationChange: handleLayerRotationChange,
@@ -1125,7 +1165,7 @@ const CanvasStage = React.forwardRef<
       getCrop: () => crop,
       setCrop: applyCrop
     }),
-    [handleAddText, handleCropConfirm, handleLayerDelete, handleLayerVisibilityToggle, handleLayerMove, handleLayerDuplicate, handleLayerScaleChange, handleLayerScaleChangeEnd, handleLayerRotationChange, handleLayerRotationChangeEnd, handleLayerOpacityChange, handleLayerBlendModeChange, handleLayerLockedChange, handleAddLayer, crop, applyCrop]
+    [handleAddText, handleCropConfirm, handleLayerDelete, handleLayerVisibilityToggle, handleLayerMove, handleLayerDuplicate, handleLayerRename, handleLayerAlignCenter, handleLayerScaleChange, handleLayerScaleChangeEnd, handleLayerRotationChange, handleLayerRotationChangeEnd, handleLayerOpacityChange, handleLayerBlendModeChange, handleLayerLockedChange, handleAddLayer, crop, applyCrop]
   )
 
   const hitTest = (viewPt: Point): Hit | null => {
@@ -1492,15 +1532,11 @@ const CanvasStage = React.forwardRef<
           }
           // 如果还是找不到元数据，但正在编辑，使用 editingTextValue 作为后备
           if (!metadata && editingTextValue) {
-            // 创建一个临时元数据对象
+            // 创建一个临时元数据对象（完整字段），避免类型缺失
+            const defaults = getDefaultTextConfig()
             metadata = {
-              text: editingTextValue,
-              fontSize: 24,
-              fontFamily: 'system-ui, -apple-system, sans-serif',
-              color: '#000000',
-              align: 'left' as const,
-              bold: false,
-              italic: false
+              ...defaults,
+              text: editingTextValue || ' '
             }
           }
           return metadata

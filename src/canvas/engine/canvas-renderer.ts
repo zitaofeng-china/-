@@ -174,7 +174,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
     const target = targetLayerId
       ? state.layers.find((l) => l.id === targetLayerId)
       : state.layers[state.layers.length - 1]
-    if (!target) return
+    if (!target || target.locked) return
     
     // 创建一个canvas来容纳裁剪后的图像
     const off = document.createElement('canvas')
@@ -367,6 +367,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
   function moveLayer(id: string, direction: 'up' | 'down') {
     const idx = state.layers.findIndex((l) => l.id === id)
     if (idx === -1) return
+    if (state.layers[idx].locked) return
     const target = direction === 'up' ? idx + 1 : idx - 1
     if (target < 0 || target >= state.layers.length) return
     ;[state.layers[idx], state.layers[target]] = [state.layers[target], state.layers[idx]]
@@ -375,7 +376,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
 
   function moveLayerOffset(id: string, dx: number, dy: number) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     layer.offset.x += dx
     layer.offset.y += dy
     render()
@@ -383,35 +384,35 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
 
   function setLayerOffset(id: string, offset: Vec2) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     layer.offset = { ...offset }
     render()
   }
 
   function setLayerScale(id: string, scale: number) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     layer.scale = clamp(scale, 0.1, 5) // 限制缩放范围在0.1到5倍之间
     render()
   }
 
   function setLayerRotation(id: string, rotation: number) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     layer.rotation = rotation % 360 // 归一化角度
     render()
   }
 
   function setLayerOpacity(id: string, opacity: number) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     layer.opacity = clamp(opacity, 0, 1)
     render()
   }
 
   function setLayerBlendMode(id: string, blendMode: GlobalCompositeOperation) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     layer.blendMode = blendMode
     render()
   }
@@ -462,6 +463,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
     const idx = state.layers.findIndex((l) => l.id === id)
     if (idx === -1) return
     const layer = state.layers[idx]
+    if (layer.locked) return
     layer.bitmap.close?.()
     state.layers.splice(idx, 1)
     recomputeSize()
@@ -470,7 +472,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
 
   function duplicateLayer(id: string) {
     const layer = state.layers.find((l) => l.id === id)
-    if (!layer) return
+    if (!layer || layer.locked) return
     // 创建新的bitmap副本
     const canvas = document.createElement('canvas')
     canvas.width = layer.bitmap.width

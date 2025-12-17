@@ -3,129 +3,176 @@
  * 提供编辑器工具的选择和切换功能
  */
 import React from 'react'
-import type { EditorTool } from '../../types'
 
 type Props = {
-  activeTool: EditorTool
-  onSelectTool: (tool: EditorTool) => void
+  activeTool: 'crop' | 'filter' | 'draw' | 'text' | null
+  onSelectTool: (tool: 'crop' | 'filter' | 'draw' | 'text' | null) => void
   onUndo?: () => void
   onRedo?: () => void
   canUndo?: boolean
   canRedo?: boolean
+  onExport?: () => void
+  onReset?: () => void
 }
 
-export function ToolSidebar({ activeTool, onSelectTool, onUndo, onRedo, canUndo, canRedo }: Props) {
+// 选择工具图标（虚线框）
+const SelectIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="5" y="5" width="14" height="14" strokeDasharray="3 2" />
+    <path d="M9 5V3M15 5V3M5 9H3M5 15H3M9 21V19M15 21V19M21 9H19M21 15H19" />
+  </svg>
+)
+
+// 撤销图标
+const UndoIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M3 7v6h6" />
+    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-9 9" />
+  </svg>
+)
+
+// 重做图标
+const RedoIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 7v6h-6" />
+    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 9 9" />
+  </svg>
+)
+
+// 裁剪图标
+const CropIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+    <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+  </svg>
+)
+
+// 滤镜图标
+const FilterIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 1v6m0 6v6" />
+    <path d="m4.2 4.2 4.3 4.3m7 7 4.3 4.3" />
+    <path d="M1 12h6m6 0h6" />
+    <path d="m4.2 19.8 4.3-4.3m7-7 4.3-4.3" />
+  </svg>
+)
+
+// 画笔图标
+const DrawIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="m18 2 4 4-14 14H4v-4L18 2z" />
+    <path d="M14.5 5.5 18.5 9.5" />
+  </svg>
+)
+
+// 文字图标
+const TextIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="4 7 4 4 20 4 20 7" />
+    <line x1="9" y1="20" x2="15" y2="20" />
+    <line x1="12" y1="4" x2="12" y2="20" />
+  </svg>
+)
+
+// 导出图标（软盘）
+const ExportIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M4 4h12l4 4v12H4z" />
+    <path d="M12 16v-6" />
+    <path d="M9 13l3 3 3-3" />
+    <path d="M4 9h12" />
+  </svg>
+)
+
+// 重置/删除图标（垃圾桶）
+const ResetIcon = () => (
+  <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M3 6h18" />
+    <path d="M8 6V4h8v2" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+    <path d="M5 6l1 14h12l1-14" />
+  </svg>
+)
+
+export function ToolSidebar({
+  activeTool,
+  onSelectTool,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onExport,
+  onReset
+}: Props) {
+  const tools = [
+    { id: 'select' as const, icon: <SelectIcon />, title: '选择' },
+    { id: 'crop' as const, icon: <CropIcon />, title: '裁剪' },
+    { id: 'filter' as const, icon: <FilterIcon />, title: '滤镜' },
+    { id: 'draw' as const, icon: <DrawIcon />, title: '涂鸦' },
+    { id: 'text' as const, icon: <TextIcon />, title: '文字' },
+  ]
+
   return (
     <div className="tool-sidebar">
-      <div className="tool-sidebar-header">
-        {/* 撤销（上一步） */}
-        <button
-          className="tool-button"
-          onClick={onUndo}
-          disabled={!canUndo}
-          title="撤销（上一步）"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 7v6h6" />
-            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
-          </svg>
-        </button>
+      {/* 撤销/重做按钮 */}
+      <button
+        className="tool-button"
+        onClick={onUndo}
+        disabled={!canUndo}
+        title="撤销 (Ctrl+Z)"
+      >
+        <UndoIcon />
+      </button>
+      <button
+        className="tool-button"
+        onClick={onRedo}
+        disabled={!canRedo}
+        title="重做 (Ctrl+Y)"
+      >
+        <RedoIcon />
+      </button>
+      
+      <div className="tool-divider" />
+      
+      {/* 工具按钮 */}
+      {tools.map((tool, index) => (
+        <React.Fragment key={tool.id}>
+          <button
+            className={`tool-button ${tool.id === 'select' ? (activeTool === null ? 'active' : '') : activeTool === tool.id ? 'active' : ''}`}
+            onClick={() => {
+              if (tool.id === 'select') {
+                onSelectTool(null)
+              } else {
+                onSelectTool(activeTool === tool.id ? null : tool.id)
+              }
+            }}
+            title={tool.title}
+          >
+            {tool.icon}
+          </button>
+          {index < tools.length - 1 && <div className="tool-divider" />}
+        </React.Fragment>
+      ))}
 
-        {/* 重做（下一步） */}
-        <button
-          className="tool-button"
-          onClick={onRedo}
-          disabled={!canRedo}
-          title="重做（下一步）"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 7v6h-6" />
-            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 11" />
-          </svg>
-        </button>
-      </div>
-      <div className="tool-sidebar-list">
-        {/* 选择工具 - 虚线方框 */}
-        <button
-          className={`tool-button ${activeTool === null ? 'active' : ''}`}
-          onClick={() => onSelectTool(null)}
-          title="选择工具"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="3" width="18" height="18" strokeDasharray="4 4" rx="2" />
-          </svg>
-        </button>
+      <div className="tool-divider" />
 
-        {/* 裁剪工具 */}
-        <button
-          className={`tool-button ${activeTool === 'crop' ? 'active' : ''}`}
-          onClick={() => onSelectTool(activeTool === 'crop' ? null : 'crop')}
-          title="裁剪工具"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M6 2v4h4" />
-            <path d="M18 2v4h-4" />
-            <path d="M6 22v-4h4" />
-            <path d="M18 22v-4h-4" />
-            <rect x="2" y="6" width="20" height="12" rx="1" />
-          </svg>
-        </button>
-
-        {/* 画笔工具 */}
-        <button
-          className={`tool-button ${activeTool === 'draw' ? 'active' : ''}`}
-          onClick={() => onSelectTool(activeTool === 'draw' ? null : 'draw')}
-          title="画笔工具"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="m12 19 7-7 3 3-7 7-3-3z" />
-            <path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
-            <path d="m2 2 7.586 7.586" />
-            <circle cx="11" cy="11" r="2" />
-          </svg>
-        </button>
-
-        {/* 文字工具 */}
-        <button
-          className={`tool-button ${activeTool === 'text' ? 'active' : ''}`}
-          onClick={() => onSelectTool(activeTool === 'text' ? null : 'text')}
-          title="文字工具"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M4 20h16" />
-            <path d="M6 20V4h6a4 4 0 0 1 4 4v4" />
-          </svg>
-        </button>
-
-        {/* 分隔线 */}
-        <div className="tool-divider" />
-
-        {/* 保存 */}
-        <button
-          className="tool-button"
-          onClick={() => {}}
-          title="保存"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-            <polyline points="17 21 17 13 7 13 7 21" />
-            <polyline points="7 3 7 8 15 8" />
-          </svg>
-        </button>
-
-        {/* 删除 */}
-        <button
-          className="tool-button"
-          onClick={() => {}}
-          title="删除"
-        >
-          <svg className="tool-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="m19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-          </svg>
-        </button>
-      </div>
+      {/* 导出与重置 */}
+      <button
+        className="tool-button"
+        onClick={onExport}
+        title="导出"
+      >
+        <ExportIcon />
+      </button>
+      <button
+        className="tool-button"
+        onClick={onReset}
+        title="重置"
+      >
+        <ResetIcon />
+      </button>
     </div>
   )
 }
-

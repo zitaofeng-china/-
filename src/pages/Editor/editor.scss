@@ -184,8 +184,11 @@
 .tool-sidebar {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  padding-top: 16px;
   height: 100%;
   width: 100%;
+  gap: 0;
 }
 
 .tool-sidebar-header {
@@ -468,8 +471,8 @@
     border-color: #3b82f6;
   }
   
-  &.hidden {
-    opacity: 0.5;
+  &.layer-hidden {
+    opacity: 0.45;
   }
 }
 
