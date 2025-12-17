@@ -15,6 +15,18 @@ export type FilterState = {
   hue: number
   blur: number
   sharpen: number
+  /** 高光，0-200，中性值 100（目前用于调整整体亮度的权重，便于以后扩展更精细算法） */
+  highlights: number
+  /** 阴影，0-200，中性值 100 */
+  shadows: number
+  /** 色温，-100（偏冷）到 100（偏暖），0 为中性 */
+  temperature: number
+  /** 曝光，-100 ~ 100，0 为中性（近似影响整体亮度） */
+  exposure: number
+  /** 清晰度（中频对比度），-100 ~ 100，0 为中性 */
+  clarity: number
+  /** 褪色，0 ~ 100，0 为中性（降低对比并轻微提亮） */
+  fade: number
 }
 
 export type Layer = { 
@@ -53,7 +65,7 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
     offset: { x: 0, y: 0 } as Vec2,
     view: { w: 0, h: 0 },
     imgSize: { w: 0, h: 0 },
-    filter: { brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0 } as FilterState
+    filter: { brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0, sharpen: 0, highlights: 100, shadows: 100, temperature: 0, exposure: 0, clarity: 0, fade: 0 } as FilterState
   }
 
   const dpr = window.devicePixelRatio || 1
@@ -277,15 +289,45 @@ export function createRenderer(backgroundCanvas: HTMLCanvasElement, uiCanvas: HT
       bgCtx.clearRect(0, 0, w, h)
       
       // 构建滤镜字符串
-      const { brightness, contrast, saturation, hue, blur, sharpen } = state.filter
+      const { brightness, contrast, saturation, hue, blur, sharpen, highlights, shadows, temperature, exposure, clarity, fade } = state.filter
       const filters: string[] = []
-      if (brightness !== 100) filters.push(`brightness(${brightness}%)`)
+      // 清晰度：轻微提升中频对比度与饱和度
+      const clarityContrastBoost = clarity * 0.3
+      const claritySaturationBoost = clarity * 0.1
+
+      // 褪色：降低对比、降低饱和、轻微提升亮度
+      const fadeStrength = Math.max(0, Math.min(100, fade))
+      const fadeBrightnessBoost = fadeStrength * 0.2
+      const fadeContrastDrop = fadeStrength * 0.6
+      const fadeSaturationDrop = fadeStrength * 0.2
+
+      // 高光 / 阴影简单映射到整体亮度（高光/阴影为负值时整体变暗，为正值时整体变亮）
+      const hlOffset = (highlights - 100) * 0.3
+      const shOffset = (shadows - 100) * 0.2
+      // 曝光简单叠加到亮度，避免与色温过度抵消
+      const expOffset = exposure * 0.8
+      const effectiveBrightness = brightness + hlOffset + shOffset + expOffset + fadeBrightnessBoost
+      if (effectiveBrightness !== 100) filters.push(`brightness(${effectiveBrightness}%)`)
+
+      // 色温模拟：用 sepia + saturate + hue-rotate 组合近似冷暖调
+      if (temperature !== 0) {
+        const t = Math.max(-100, Math.min(100, temperature))
+        const tone = Math.abs(t)
+        const sepiaPct = t > 0 ? tone * 0.6 : tone * 0.25
+        const saturatePct = 100 + t * 0.3
+        const hueShift = t * -0.4 // 正值暖 -> 负角度偏红，负值冷 -> 正角度偏蓝
+        if (sepiaPct !== 0) filters.push(`sepia(${sepiaPct}%)`)
+        if (saturatePct !== 100) filters.push(`saturate(${saturatePct}%)`)
+        if (hueShift !== 0) filters.push(`hue-rotate(${hueShift}deg)`)
+      }
       // 锐化和对比度结合：锐化通过增加对比度来实现
+      const contrastBase = contrast + clarityContrastBoost - fadeContrastDrop
       const effectiveContrast = sharpen > 0 
-        ? contrast + (sharpen / 100) * 20 
-        : contrast
+        ? contrastBase + (sharpen / 100) * 20 
+        : contrastBase
       if (effectiveContrast !== 100) filters.push(`contrast(${effectiveContrast}%)`)
-      if (saturation !== 100) filters.push(`saturate(${saturation}%)`)
+      const effectiveSaturation = saturation + claritySaturationBoost - fadeSaturationDrop
+      if (effectiveSaturation !== 100) filters.push(`saturate(${effectiveSaturation}%)`)
       if (hue !== 0) filters.push(`hue-rotate(${hue}deg)`)
       if (blur > 0) filters.push(`blur(${blur}px)`)
       

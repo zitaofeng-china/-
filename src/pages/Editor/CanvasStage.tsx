@@ -35,8 +35,34 @@ type Props = {
   cropGuidesVisible?: boolean
   drawEnabled?: boolean
   textEnabled?: boolean
-  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
-  onFilterChange: (next: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }) => void
+  filterState: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights: number
+    shadows: number
+    temperature: number
+    exposure: number
+    clarity: number
+    fade: number
+  }
+  onFilterChange: (next: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights: number
+    shadows: number
+    temperature: number
+    exposure: number
+    clarity: number
+    fade: number
+  }) => void
   onFileNameChange: (name: string | null) => void
   onTimeline: (text: string) => void
   onLayersChange?: (layers: UILayer[]) => void

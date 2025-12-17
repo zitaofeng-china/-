@@ -24,7 +24,20 @@ export type TimelineEntry = {
  * 编辑器状态快照（包含位图数据）
  */
 export type EditorSnapshot = {
-  filterState: { brightness: number; contrast: number; saturation: number; hue: number; blur: number; sharpen: number }
+  filterState: {
+    brightness: number
+    contrast: number
+    saturation: number
+    hue: number
+    blur: number
+    sharpen: number
+    highlights?: number
+    shadows?: number
+    temperature?: number
+    exposure?: number
+    clarity?: number
+    fade?: number
+  }
   layers: LayerSnapshot[]
   activeLayerIndex: number
   fileName: string | null
